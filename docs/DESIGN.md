@@ -1,80 +1,82 @@
-# 设计点、取舍和已知问题
+# Design, trade-offs and known problems
+
+English | [简体中文](DESIGN.zh-CN.md)
 
 ## rekit
 
-- 单文件模块加几个可选伴生文件（`_emu.py`、`_notes.py`、`_crypto.py`、`_run.py`、`_calc.py`），只依赖标准库和 IDAPython。
-- 每次调用返回字典；地址统一用十六进制字符串；每次调用有硬字数预算，截断时必报总数和续取方法；出错返回“错误 + 提示”而不是 traceback。
-- 对 IDA 数据库只读。仿真用的内存镜像写到 `tmp/rekit-images/`，不进 IDB。
-- 加载方式是在 `execute_python` 里按路径引导，不装进任何 Python 环境，因为 ida-mcp 的环境会随升级重建。
+- One module plus a few optional companion files (`_emu.py`, `_notes.py`, `_crypto.py`, `_run.py`, `_calc.py`). It depends only on the standard library and IDAPython.
+- Every call returns a dict. Addresses are always hex strings. Every call has a hard character budget; when output is truncated, the reply states the total and how to fetch the rest. Errors come back as "error plus hint", never as a traceback.
+- Read-only with respect to the IDA database. Memory images for emulation are written to `tmp/rekit-images/`, not into the IDB.
+- It is loaded by path from inside `execute_python` and is not installed into any Python environment, because ida-mcp's environment is rebuilt on upgrade.
 
 ## reworker
 
-- **校验代理**（`guardproxy.py`）：工人看到的 MCP 服务器其实是这个代理，它再去启动真正的 ida-mcp。代理过滤工具列表、逐个检查调用、机械执行调用预算、完整记录每次调用。任何内部错误都直接退出，工人就没有工具可用。
-- **契约**（`contract.py`）：任务六个字段；结果是 `status / summary / findings / unknowns / needs`，每条 finding 带证据地址和置信度。
-- **落地检查**：证据地址必须在任务或工人自己的工具结果里出现过，否则标 `grounded: false`。这只说明“地址见过”，不说明结论对。
-- **审计**：每次运行后对照工人进程的事件流和代理日志，出现非 ida 工具调用或绕过代理的结果就判整次无效（退出码 3）。
-- **台账**（`findings/<库名>.jsonl`）：只追加；`rew verify` 标核验或驳回，`rew note` 记主控自己的结论。
-- **精确值回填**：工人答案里写 `{{7.buffers.top[name=out].hex}}`，`rew` 换成第 7 次调用结果里的原值。答案里剩下的长十六进制若在任何工具输出里都找不到会被列出。
+- **Guard proxy** (`guardproxy.py`): the MCP server the worker sees is this proxy, which in turn starts the real ida-mcp. The proxy filters the tool list, checks each call, enforces the call budget mechanically, and logs every call in full. On any internal error it exits, which leaves the worker with no tools.
+- **Contract** (`contract.py`): a task has six fields. A result is `status / summary / findings / unknowns / needs`, and each finding carries evidence addresses and a confidence level.
+- **Grounding check**: an evidence address must have appeared in the task or in the worker's own tool results; otherwise the finding is marked `grounded: false`. This shows only that the address was seen. It does not show that the conclusion is right.
+- **Audit**: after each run, the worker process's event stream is compared with the proxy log. A non-IDA tool call, or a result that did not come through the proxy, voids the whole run (exit code 3).
+- **Ledger** (`findings/<database name>.jsonl`): append-only. `rew verify` marks a finding verified or rejected. `rew note` records the orchestrator's own conclusions.
+- **Exact-value back-references**: a worker writes `{{7.buffers.top[name=out].hex}}` in its answer, and `rew` replaces it with the original value from the result of call 7. Any long hex string left in the answer that cannot be found in any tool output is listed.
 
 ## remu
 
-- 每个请求起一个全新的 Unicorn 实例，把镜像写进去，按调用约定或显式寄存器放参数，跑到返回哨兵地址为止。
-- 导入一律拦截：常见的内存、字符串、堆、码页函数有模型，其余记录参数后返回 0。
-- `init=[...]` 先在同一状态里跑若干初始化函数再调目标函数，用来处理运行时才生成的表。
-- 回复包含停止原因、返回值、被改动的参数缓冲区、其他被写的内存及其中的字符串、导入调用序列。
+- Each request gets a fresh Unicorn instance. The image is written in, arguments are placed by calling convention or as explicit registers, and execution runs until it reaches a sentinel return address.
+- Every import is intercepted. Common memory, string, heap and code-page functions are modelled. The rest record their arguments and return 0.
+- `init=[...]` runs a list of initialisation functions in the same state before calling the target function. This handles tables that are only generated at run time.
+- The reply contains the stop reason, the return value, argument buffers that were modified, other memory that was written and the strings in it, and the sequence of import calls.
 
 ## recalc
 
-- 自己写的受限解释器，不用 `eval`；没有文件、导入、属性访问；步数、时间、整数位数、序列长度都有上限。
-- 内置哈希、分组密码、椭圆曲线的参考实现，标准常量可以覆盖，用来验证“标准算法只改了一处”这类判断。
+- A purpose-written restricted interpreter with no `eval`. No files, no imports, no attribute access. Step count, time, integer bit length and sequence length are all capped.
+- It has built-in reference implementations of hashes, block ciphers and elliptic curves whose standard constants can be overridden. This is for checking claims of the form "a standard algorithm with one thing changed".
 
 ## rebox
 
-- 外层进程算哈希、建输出目录，然后在 `sandbox-exec` 里重启自己；子进程先自检沙箱确实生效（连网、写目录外都必须被拒），再碰样本。
-- 摘要按 API 类别、指标、转储分块，受字数预算约束。
-- **ELF 仿真**（`rebox run`，Qiling，独立环境 `.venv-elf`）：同一个沙箱。网络系统调用全部换成自己的实现，连接假装成功、读取为空、域名统一解析到一个固定地址；`execve` 只记录并结束该进程；`fork` 后先跑子进程再恢复父进程；每次运行用自己的一份根文件系统，跑完比对出新增和改动的文件。
-- **真跑**（`rebox live`，Docker）：`--network none`、零挂载（样本和结果都走 `docker cp`）、能力全丢、`no-new-privileges`、进程数/内存/CPU 限额。启动样本前在容器内自检只有回环网卡，不过就不跑。ARM64 原生跑在 `strace` 下，x86 和 x86-64 跑在 `strace` 包着的 QEMU 用户态里。可选 `--fakenet` 在容器内起一个应答 DNS、接收任意 TCP 的假服务。
+- The outer process hashes the sample, creates the output directory, then restarts itself under `sandbox-exec`. The child first checks that the sandbox is actually in effect (connecting to the network and writing outside the directory must both be refused) and only then touches the sample.
+- The summary is split into blocks by API category, indicators and dumps, and is held to a character budget.
+- **ELF emulation** (`rebox run`, Qiling, in a separate environment `.venv-elf`): the same sandbox. All network system calls are replaced with rebox's own implementations: connections pretend to succeed, reads return nothing, and every hostname resolves to one fixed address. `execve` is recorded and ends that process. After `fork`, the child runs first and the parent is then resumed. Each run uses its own copy of the root filesystem, which is diffed afterwards for new and changed files.
+- **Real execution** (`rebox live`, Docker): `--network none`, no mounts (the sample and the results both travel through `docker cp`), all capabilities dropped, `no-new-privileges`, and limits on process count, memory and CPU. Before starting the sample, a check inside the container confirms that only the loopback interface exists; if the check fails, nothing runs. ARM64 runs natively under `strace`. x86 and x86-64 run under QEMU user mode wrapped in `strace`. The optional `--fakenet` starts a fake service inside the container that answers DNS and accepts any TCP connection.
 
-## 取舍
+## Trade-offs
 
-| 决定 | 理由 | 怎么改 |
+| Decision | Reason | Where to change it |
 |---|---|---|
-| 校验器做成 MCP 代理，而不是工人 harness 的钩子 | 钩子在崩溃、超时、配置读不出时会放行调用，不适合当唯一防线。代理与 harness 无关，换后端也能直接套 | — |
-| 工人只看到 4 个 ida 工具；不给保存和关闭；只能打开指定的库 | 最小权限 | `guard.py` |
-| 工人默认推理档是 high | 同一任务 high 和 low 都答对，low 快约两成但有笔误 | `rew --effort` |
-| 工人可以用函数级仿真 | 仿真在独立进程里解释执行，没有系统调用。代价是仿真期间 IDA 主线程被占住 | `guard.py` |
-| 工人的整程序运行只走 `rebox run` | 沙箱仿真，够不到容器真跑 | `rekit/_run.py` |
-| 函数卡片只显示已核验的笔记 | 否则未核验的工人结论会被下一个工人当作证据引用回来 | `rekit/_notes.py` |
-| free 模式只按名字拦写操作，不是沙箱 | 有意绕过是能绕过的，所以默认 strict | `rew --mode` |
-| 结果预算 6000 字符、最多 8 条 findings、每条最多 4 个证据 | 主控上下文有限 | `rew --max-chars / --max-findings` |
-| 低于 0x1000 的数不算地址 | 结构体偏移不该让结论“落地” | `contract.py` |
-| `trim` 只去掉值仅被传递的指针强转 | 其余强转参与解引用或运算，去掉会改含义 | `rekit.code(mode="raw")` |
-| UTF-16 字符串索引只对 PE 默认开 | 在一个 1.9GB 的 Mach-O 库上开了要 86 秒，关了 21 秒 | `rekit.find(..., wide=True)` |
-| 建字符串索引时临时改 IDA 的字符串列表设置，建完恢复 | 这是对“只读”的一处让步 | `rekit.py` |
-| remu 所有段按可读可写可执行映射 | 简单，且自修改代码能跑 | `remu/src/remu/emu.py` |
-| remu 对无原型的 x86 导入按“清栈 0 字节”处理并警告 | 实测样本里过半导入没有原型 | 请求里用 `imports` 覆盖 |
-| rebox 沙箱限写不限读 | 样本目录和 Python 运行时都要读 | `rebox/src/rebox/sandbox.py` |
+| The guard is an MCP proxy, not a hook in the worker's harness | A hook lets calls through when it crashes, times out, or cannot read its configuration, so it is unfit to be the only line of defence. A proxy is independent of the harness and carries over to another backend unchanged | — |
+| The worker sees only 4 IDA tools, with no save and no close, and can open only the named database | Least privilege | `guard.py` |
+| The worker's default reasoning effort is high | On the same task, high and low both answered correctly. Low was about 20% faster but made a slip in its summary | `rew --effort` |
+| Workers may use function-level emulation | Emulation is interpreted in a separate process and makes no system calls. The cost is that IDA's main thread is occupied while it runs | `guard.py` |
+| A worker's whole-program runs go only through `rebox run` | That is sandboxed emulation. It cannot reach real execution in a container | `rekit/_run.py` |
+| Function cards show only verified notes | Otherwise an unverified worker finding would be cited back as evidence by the next worker | `rekit/_notes.py` |
+| Free mode blocks write operations by name only and is not a sandbox | It can be bypassed deliberately, which is why strict is the default | `rew --mode` |
+| Result budget: 6000 characters, at most 8 findings, at most 4 evidence addresses each | The orchestrator's context is limited | `rew --max-chars / --max-findings` |
+| Numbers below 0x1000 do not count as addresses | A struct offset should not make a finding "grounded" | `contract.py` |
+| `trim` removes only pointer casts whose value is merely passed along | Other casts take part in dereferences or arithmetic, and removing them would change the meaning | `rekit.code(mode="raw")` |
+| The UTF-16 string index is on by default only for PE | On one 1.9 GB Mach-O library it took 86 seconds with the index on and 21 seconds with it off | `rekit.find(..., wide=True)` |
+| Building the string index temporarily changes IDA's string-list settings and restores them afterwards | This is one concession on "read-only" | `rekit.py` |
+| remu maps every segment readable, writable and executable | It is simple, and self-modifying code runs | `remu/src/remu/emu.py` |
+| For x86 imports with no prototype, remu assumes the callee pops 0 bytes and warns | In the samples tested, more than half the imports had no prototype | override with `imports` in the request |
+| The rebox sandbox restricts writes but not reads | Both the sample directory and the Python runtime have to be readable | `rebox/src/rebox/sandbox.py` |
 
-没做的：本地小模型离线索引（经 API 的小模型更准）、用逆向特化模型改写伪代码（改写会引入语义错误）、32 位 ARM 和 MIPS。
+Not done: offline indexing with a local small model (a small model behind an API was more accurate), rewriting pseudocode with a model specialised for reverse engineering (rewriting introduces semantic errors), 32-bit ARM and MIPS.
 
-## 实测数据
+## Measurements
 
-- 函数卡片对比“原始伪代码 + 平铺引用”少约 50% 字符；不带代码的分诊卡片少约 90%。热点函数的引用查询从 93.5 万字符压到 1.4KB。
-- 函数级仿真一次调用 30–70 毫秒；镜像导出 14MB 用 0.2 秒，171MB 用 2.6 秒。
-- 整程序仿真对大型 GUI 程序价值有限：一个 Delphi 样本在运行库初始化阶段就停了。这类目标的主力是函数级仿真。
-- 窄任务一个工人十几万 token；开放式任务（“搞清楚这个程序在干什么”）120–240 万 token，要拆窄。
-- 工人答错的类型：把“永不执行”理解成“分发表里够不着”、肉眼比对 64 个常量漏掉一位、抄写长十六进制丢字符、给函数定性过头。后三类分别由密码常量比对、精确值回填和主控核验来兜。
+- A function card is about 50% fewer characters than "raw pseudocode plus a flat xref list". A triage card without code is about 90% fewer. An xref query on a hot function went from 935,000 characters to 1.4 KB.
+- One function-level emulation call takes 30–70 ms. Exporting an image takes 0.2 s for 14 MB and 2.6 s for 171 MB.
+- Whole-program emulation is of limited value for large GUI programs: one Delphi sample stopped during runtime-library initialisation. Function-level emulation does the real work on such targets.
+- A narrow task costs a worker somewhat over 100,000 tokens. An open-ended task ("work out what this program does") costs 1.2–2.4 million and should be split into narrow ones.
+- The kinds of worker errors seen: reading "never executed" as "unreachable from the dispatch table"; missing one hex digit when comparing 64 constants by eye; dropping characters when copying a long hex string; overstating what a function is for. The last three are covered by crypto-constant matching, exact-value back-references and orchestrator verification respectively.
 
-## 已知问题
+## Known problems
 
-- **工人慢**：再小的问题也要几十秒到几分钟。单个查询主控自己用 rekit 更快。
-- **`grounded` 是弱信号**：只证明地址出现过。`confidence` 也偏高，不能替代核验。
-- **任务措辞有歧义时工人不会问**：计数口径要写清，并要求给出调用链。
-- **工人后端是预览版软件**：升级后先跑 `rew doctor`，它会用假模型启动 profile 并检查工人实际拿到的工具列表。
-- **IDA 数据库可能被保存**：ida-mcp 在最后一个会话释放库时会自动保存。工具没有改内容，但 `.i64` 的修改时间会变。
-- **`rebox live` 的残余风险**：容器不是恶意样本级别的隔离边界。详见 `tools/rebox/LIVE.md`。
-- **glibc 动态链接的 ELF 在仿真里解析不了域名**：rootfs 里没有 `libnss_dns`。查询的域名仍会被记录，但样本自己看到的是解析失败。需要看解析之后的行为时用 `rebox live --fakenet`。
-- `rekit.crypto` 扫不到按公式现场计算的常量（SM4 的 CK、AES 的 Rcon）和用 SIMD 从别的数据算出来的常量。
-- `rekit.run` 对 Windows PE 抓不到控制台输出，也不支持标准输入。
-- 运行记录目录 `tmp/` 不会自动清理，要手动跑 `./gc --apply`。
-- 测试框架不统一：`remu`、`recalc`、`rebox` 用 pytest，其余是 `python3 test_x.py` 脚本。`./test` 把它们串成了一个入口。
+- **Workers are slow.** Even a tiny question takes tens of seconds to minutes. For a single lookup the orchestrator is faster using rekit directly.
+- **`grounded` is a weak signal.** It proves only that the address appeared. `confidence` also runs high and is no substitute for verification.
+- **A worker will not ask when the task wording is ambiguous.** State exactly what is being counted, and ask for the call chain.
+- **The worker backend is preview software.** After upgrading it, run `rew doctor` first. It starts the profile with a fake model and checks the tool list the worker actually receives.
+- **The IDA database may get saved.** ida-mcp saves automatically when the last session releases a database. The tools changed nothing, but the modification time of the `.i64` changes.
+- **Residual risk in `rebox live`.** A container is not an isolation boundary fit for hostile malware. See `tools/rebox/LIVE.md`.
+- **Dynamically linked glibc ELFs cannot resolve hostnames under emulation.** The rootfs has no `libnss_dns`. The queried name is still recorded, but the sample itself sees a resolution failure. To observe behaviour after resolution, use `rebox live --fakenet`.
+- `rekit.crypto` cannot find constants that are computed on the spot from a formula (SM4's CK, AES's Rcon) or derived from other data with SIMD.
+- `rekit.run` cannot capture console output from a Windows PE and does not support standard input for one.
+- The run-record directory `tmp/` is not cleaned automatically. Run `./gc --apply` by hand.
+- The test frameworks are not uniform: `remu`, `recalc` and `rebox` use pytest, and the rest are `python3 test_x.py` scripts. `./test` chains them behind one entry point.

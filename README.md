@@ -1,122 +1,136 @@
 # retools
 
-让大模型指挥便宜的小模型做 IDA 逆向细活的一套本地工具。主控模型拆任务、核验结论；小模型（“工人”）只能通过一个校验代理访问 IDA，只能调用固定的只读接口，交回带证据地址的 JSON。
+English | [简体中文](README.zh-CN.md)
 
-出发点：通用模型做逆向的瓶颈在接口，不在模型。小模型猜 IDAPython API 容易错，所以把接口固定下来，并用机械手段限制它能做什么。
+Local tools that let a large model direct cheap small-model workers through the legwork of reverse engineering in IDA. The orchestrating model splits the job into narrow tasks and verifies what comes back. Each worker reaches IDA only through a guard proxy, can call only a fixed read-only API, and returns JSON in which every finding carries evidence addresses.
 
-> **这是一份个人工具的快照，不是受维护的项目。** 它只在作者自己的机器上跑过（macOS、Apple Silicon）。Issues 已关闭，不接受功能请求，PR 不保证会看，没有版本号，也不承诺接口稳定。公开它是为了让设计和实测数据可以被查看和引用；要用的话请 fork。
+The premise: when a general-purpose model does reverse engineering, the bottleneck is the interface, not the model. Small models guess IDAPython APIs wrong, so the interface is fixed, and what a worker can do is limited by mechanism instead of by instruction.
 
-## 部件
+> **This is a snapshot of personal tooling, not a maintained project.** It has only run on the author's machine (macOS, Apple Silicon). Issues are closed, feature requests are not accepted, pull requests may go unread, there are no version numbers, and no interface is promised to stay stable. It is public so the design and the measurements can be read and cited. Fork it if you want to use it.
 
-| 部件 | 做什么 | 文档 |
+A write-up of the design, one blind benchmark run, and how often worker findings survived review on a real sample: [1A7432/writeups: An LLM worker harness for IDA reverse engineering](https://github.com/1A7432/writeups/tree/main/2026-11-llm-re-worker-harness).
+
+## Components
+
+| Component | What it does | Docs |
 |---|---|---|
-| `tools/rekit/` | IDA 内的只读紧凑视图：函数卡片、伪代码、引用、调用树、搜索、反汇编、密码常量比对，以及函数级仿真、整程序运行、计算草稿的入口 | `SKILL.md` |
-| `tools/reworker/` | `rew` 命令：把一个窄任务派给工人，校验结果、审计调用、记入台账 | `SKILL.md` |
-| `tools/remu/` | 函数级仿真器（Unicorn），吃 rekit 导出的内存镜像 | `README.md` |
-| `tools/recalc/` | 受限的计算草稿：算术、哈希、分组密码、椭圆曲线，不用 `eval` | `README.md` |
-| `tools/rebox/` | 整程序行为报告：`rebox run` 在 macOS 沙箱里仿真 PE（Speakeasy）和 ELF（Qiling）；`rebox live` 在断网 Docker 容器里真跑 ELF | `README.md`、`LIVE.md`、`SKILL.md` |
-| `tools/jsworker/` | `jsw` 命令：同样的工人模式用于 JS 逆向，工具全部在 Docker 容器里执行 | `README.md` |
+| `tools/rekit/` | Compact read-only views inside IDA: function cards, pseudocode, xrefs, call trees, search, disassembly, crypto-constant matching, plus entry points for function-level emulation, whole-program runs, and a calculator | `SKILL.md` |
+| `tools/reworker/` | The `rew` command: hands one narrow task to a worker, validates the result, audits the calls, and records findings in a ledger | `SKILL.md` |
+| `tools/remu/` | Function-level emulator (Unicorn) that runs on memory images exported by rekit | `README.md` |
+| `tools/recalc/` | A restricted calculator: arithmetic, hashes, block ciphers, elliptic curves. No `eval` | `README.md` |
+| `tools/rebox/` | Whole-program behaviour reports. `rebox run` emulates a PE (Speakeasy) or an ELF (Qiling) inside a macOS sandbox. `rebox live` really runs an ELF in a Docker container with no network | `README.md`, `LIVE.md`, `SKILL.md` |
+| `tools/jsworker/` | The `jsw` command: the same worker pattern for JavaScript reverse engineering, with every tool executed inside a Docker container | `README.md` (Chinese) |
 
-数据流：主控写任务 → `rew` 起一个无头的工人进程 → 工人只能通过校验代理访问 ida-mcp → 代理只放行 rekit 调用 → 工人交回 JSON → `rew` 校验、审计、记台账 → 主控抽查后标“已核验”或“驳回” → 已核验的结论出现在之后的函数卡片上。
+Data flow:
 
-设计取舍和已知问题见 [`docs/DESIGN.md`](docs/DESIGN.md)。
+1. The orchestrator writes a task.
+2. `rew` starts a headless worker process.
+3. The worker can reach ida-mcp only through the guard proxy, and the proxy only lets rekit calls through.
+4. The worker returns JSON.
+5. `rew` validates it, audits the run, and appends the findings to the ledger.
+6. The orchestrator spot-checks findings and marks each one verified or rejected.
+7. Verified findings show up on function cards from then on. Unverified ones do not.
 
-## 支持范围
+Design decisions, trade-offs and known problems are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-- 宿主：macOS（Apple Silicon）。沙箱用 `sandbox-exec`，其他系统没有试过。
-- 目标架构：x86、x86-64、ARM64。不支持 32 位 ARM 和 MIPS。
-- 目标格式：PE、ELF、Mach-O 可做静态分析和函数级仿真；整程序运行只支持 PE（仿真）和 ELF（仿真或容器真跑）。
+## Scope
 
-## 依赖
+- Host: macOS on Apple Silicon. The sandbox uses `sandbox-exec`. Other systems are untested.
+- Target architectures: x86, x86-64, ARM64. 32-bit ARM and MIPS are not supported.
+- Target formats: PE, ELF and Mach-O for static analysis and function-level emulation. Whole-program runs support PE (emulated) and ELF (emulated, or really run in a container).
 
-- IDA Pro 和 Hex-Rays 的 `ida-mcp` 命令（在 `PATH` 里，或用 `REW_IDA_MCP` 指定）
-- [uv](https://docs.astral.sh/uv/)，Python 3.12
-- 工人后端：DeepSeek Harness 的 `dsh` 命令行（用 `REW_DSH` 指定路径）和一个 OpenAI 兼容的模型端点
-- `rebox live` 和 `jsworker` 需要 Docker
+## Requirements
 
-## 安装
+- IDA Pro and the Hex-Rays `ida-mcp` command (on `PATH`, or set `REW_IDA_MCP`)
+- [uv](https://docs.astral.sh/uv/) and Python 3.12
+- Worker backend: the `dsh` CLI from DeepSeek Harness (set its path with `REW_DSH`) and an OpenAI-compatible model endpoint
+- Docker, for `rebox live` and `jsworker`
+
+## Install
 
 ```sh
-git clone <this repo> retools && cd retools
+git clone https://github.com/1A7432/retools && cd retools
 
-# 1. 各工具自己的环境
+# 1. Each tool's own environment
 for t in remu recalc rebox; do uv sync --frozen --project tools/$t; done
-tools/rebox/rebox setup-elf          # 可选：ELF 仿真环境和 Linux 运行库，需要联网
-tools/rebox/rebox live-setup         # 可选：ELF 真跑用的镜像
+tools/rebox/rebox setup-elf          # optional: ELF emulation environment and Linux runtime libraries; needs network
+tools/rebox/rebox live-setup         # optional: the image for really running ELFs
 
-# 2. 把 skill 链接到你的 agent 能找到的位置
+# 2. Link the skills to where your agent looks for them
 mkdir -p ~/.agents/skills
 for s in rekit reworker rebox; do ln -sfn "$PWD/tools/$s" ~/.agents/skills/$s; done
 
-# 3. 工人的模型端点
+# 3. The worker's model endpoint
 cp tools/reworker/profile/provider.example.yml tools/reworker/profile/provider.local.yml
-$EDITOR tools/reworker/profile/provider.local.yml    # 填你自己的端点、密钥变量名、模型
+$EDITOR tools/reworker/profile/provider.local.yml    # your endpoint, the name of the key variable, the model
 tools/reworker/rew setup
-tools/reworker/rew doctor            # 全部 ok 才能派工人
+tools/reworker/rew doctor            # every line must say ok before you dispatch a worker
 ```
 
-`provider.local.yml` 不进 git。三个 `SKILL.md` 里的路径按 `~/.agents/skills/<名字>` 写，所以第 2 步的链接位置要保持一致，或者自己改 skill 里的路径。
+`provider.local.yml` is not tracked by git. The three `SKILL.md` files write paths as `~/.agents/skills/<name>`, so keep the link location from step 2, or edit the paths in the skills.
 
-## 用法
+## Usage
 
 ```sh
-# 派一个工人
-tools/reworker/rew --db <样本或 .i64> --goal "……" --target 0x401000 --out r.json
-# 整程序仿真（PE 或 ELF，不真跑）
-tools/rebox/rebox run <样本>
-# 在断网容器里真跑 ELF
-tools/rebox/rebox live <样本.elf> [--fakenet]
+# Dispatch one worker
+tools/reworker/rew --db <sample or .i64> --goal "..." --target 0x401000 --out r.json
+# Whole-program emulation (PE or ELF; nothing runs natively)
+tools/rebox/rebox run <sample>
+# Really run an ELF in a container with no network
+tools/rebox/rebox live <sample.elf> [--fakenet]
 ```
 
-IDA 里（ida-mcp 的 `execute_python`）：
+Inside IDA (through ida-mcp's `execute_python`):
 
 ```python
 import sys; sys.path.insert(0, "<checkout>/tools/rekit")
 import rekit; rekit.help()
 ```
 
-运行记录写到 `tmp/`，台账写到 `findings/`，都不进 git。
+Run records go to `tmp/` and the ledger goes to `findings/`. Neither is tracked by git.
 
-## 测试
+## Tests
 
 ```sh
 ./test
 ```
 
-一个入口跑全部测试集。需要 Docker 或真实 `dsh` 的测试集在条件不满足时会跳过并说明原因。
+One entry point runs every suite. Suites that need Docker or a real `dsh` are skipped, with the reason shown, when those are not available.
 
-`./gc` 列出 `tmp/` 下可以清理的旧运行数据，加 `--apply` 才真的删除。
+`./gc` lists old run data under `tmp/` that can be removed. It deletes only with `--apply`.
 
-## 题库
+## Benchmarks
 
-`bench/` 下有三套盲测题，用来测整套流程而不只是工人：
+`bench/` holds three blind question sets. They test the whole workflow, not just the worker.
 
-| 目录 | 内容 |
+| Directory | Contents |
 |---|---|
-| `bench/obf1/` | 6 个去符号的 ELF、58 道题：平坦化、不透明谓词、字节码虚拟机，以及带诱饵密钥和改动常量的 SM2/SM3/SM4/SHA-256/AES 程序 |
-| `bench/obf2/` | 第二套混淆程序：6 个去符号的 ELF（x86-64 和 ARM64） |
-| `bench/jsvm1/` | 6 个受保护的前端页面，要求还原请求签名或加密逻辑 |
+| `bench/obf1/` | 6 stripped ELFs and 58 questions: control-flow flattening, opaque predicates, bytecode virtual machines, and SM2/SM3/SM4/SHA-256/AES programs with decoy keys and altered constants |
+| `bench/obf2/` | A second set of obfuscated programs: 6 stripped ELFs (x86-64 and ARM64) |
+| `bench/jsvm1/` | 6 protected web front ends; the task is to recover the request-signing or encryption logic |
 
-题目都是纯计算、纯混淆的程序，没有恶意行为。仓库里只有 `public/`（题目和二进制）；源码、答案、评分脚本和出题说明不公开，否则题库就不能再用来做盲测。
+Every program is pure computation and pure obfuscation. None does anything malicious. The repository contains only `public/` (the questions and the binaries). Sources, answers, graders and setter notes are not published, because the sets would then stop being blind.
 
-在 `obf1` 上的成绩（53 道机器评分题）：
+Scores on `obf1` (the 53 machine-graded questions):
 
-| | 得分 |
+| Configuration | Score |
 |---|---|
-| 工人单独作答 | 47 |
-| 修掉盲测查出的工具 bug 之后 | 48 |
-| 再加上密码常量比对、整程序运行、计算草稿、精确值回填 | 52 |
-| 整套流程（工人 + 主控核验） | 52，另一题是答案写法不在评分器列表里 |
+| Workers alone | 47 |
+| After fixing the tool bug the benchmark exposed | 48 |
+| After also adding crypto-constant matching, whole-program runs, the calculator, and exact-value back-references | 52 |
+| Whole workflow (workers plus orchestrator verification) | 52; the one miss is an answer spelling the grader does not accept |
 
-## 安全说明
+Each configuration was run once. The limits of these numbers are spelled out in the write-up linked above.
 
-- `rebox run` 不执行样本的原生代码；外层进程会先自检沙箱确实生效再碰样本。
-- `rebox live` 会真的执行样本。容器断网、零挂载、能力全丢，但容器不是恶意样本级别的隔离边界，详见 `tools/rebox/LIVE.md`。
-- 两种模式都没有让样本真实联网的开关。
-- 工人的“用途”类结论必须核验。实测里工人列出的事实基本可靠，定性容易出错。
+## Safety notes
 
-## 许可证
+- `rebox run` does not execute the sample's native code. The outer process first checks that the sandbox is actually in effect, and only then touches the sample.
+- `rebox live` does execute the sample. The container has no network, no mounts and no capabilities, but a container is not an isolation boundary fit for hostile malware. See `tools/rebox/LIVE.md`.
+- Neither mode has a switch that gives the sample real network access.
+- A worker's statement about what a function is *for* must be verified. In practice the facts workers list are mostly reliable, and their characterisations are not.
 
-本仓库的代码以 MIT 许可证发布，见 [`LICENSE`](LICENSE)。
+## License
 
-运行时依赖由使用者自行安装，各有自己的许可证，其中 Unicorn 和 Qiling 是 GPL-2.0，Speakeasy 是 MIT。`rebox setup-elf` 下载的 Linux 运行库（glibc 等）不随仓库分发。
+The code in this repository is released under the MIT license. See [`LICENSE`](LICENSE).
+
+Runtime dependencies are installed by the user and carry their own licenses: Unicorn and Qiling are GPL-2.0, Speakeasy is MIT. The Linux runtime libraries (glibc and others) that `rebox setup-elf` downloads are not distributed with this repository.
