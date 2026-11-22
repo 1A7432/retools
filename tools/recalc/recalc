@@ -1,0 +1,9 @@
+#!/bin/sh
+# recalc launcher. Starts the project's own virtualenv interpreter by path with
+# an empty environment, isolated mode (-I) and no site packages (-S): the tool
+# itself uses the standard library only. No PATH lookups, so it works from IDA.
+case "$0" in
+  */*) here=${0%/*} ;;
+  *) here=$(command -v -- "$0"); here=${here%/*} ;;
+esac
+exec /usr/bin/env -i "$here/.venv/bin/python" -I -S "$here/src/recalc_main.py" "$@"

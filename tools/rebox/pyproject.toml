@@ -1,0 +1,28 @@
+[project]
+name = "rebox"
+version = "0.1.0"
+description = "Sandboxed emulation of Windows PE (Speakeasy) and Linux ELF (Qiling, separate .venv-elf) samples with a compact JSON behaviour report"
+readme = "README.md"
+# 3.12 is the version this was verified on (macOS 26 arm64, Unicorn 2.1.4 wheel).
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # 2.0.0b9 is the first line that runs on Apple Silicon (Unicorn 2.x); 1.x pins
+    # Unicorn 1.0.2 and bus-errors on arm64.
+    "speakeasy-emulator==2.0.0b9",
+    "unicorn==2.1.4",
+]
+
+# The Qiling backend for ELF samples lives in a separate environment (.venv-elf),
+# built by `rebox setup-elf` (src/rebox/elfsetup.py, pins in elf-constraints.txt);
+# it is deliberately not a dependency here, so uv.lock and the PE path are unchanged.
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

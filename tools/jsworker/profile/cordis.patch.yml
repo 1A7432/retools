@@ -1,0 +1,105 @@
+# Patch layer for the dsh profile `js-worker` (bundles: dsh-base + dsh-headless).
+# This file is a template. `jsw setup` renders it (provider rows from
+# reworker/profile/provider.local.yml, or provider.example.yml when that is absent,
+# and the @...@ paths) into ~/.dsh/profiles/js-worker/cordis.patch.yml; edit it here,
+# not there.
+#
+# The worker model may only use the jsre MCP tools (jsre_mcp.py), which run
+# everything inside the run's Docker container. Every other model-facing tool
+# row is disabled below, and so are the rows that would put workspace files
+# (AGENTS.md / CLAUDE.md, skills) into the prompt. `jsw doctor` checks the
+# composed config and the tools dsh actually offers the model.
+
+# @PROVIDER_ROWS@
+
+# Benchmark runs default to effort max (HARNESS.md section 6); `jsw run --effort`
+# overrides it per run.
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: "@PROVIDER@"
+    model: "@MODEL@"
+    reasoningEffort: max
+
+# The headless bundle disables the stored-credential store; the key lives there.
+- id: credentials
+  disabled: false
+- id: authorization
+  disabled: false
+
+# The headless bundle calls the agent a coding agent; the task prompt says the rest.
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      You are a JavaScript reverse-engineering worker powered by the {{model}} model.
+
+# A session title costs an extra model call per run and nobody reads it.
+- id: session-title-llm
+  disabled: true
+
+# Workspace instruction files (AGENTS.md / CLAUDE.md up the cwd chain and in
+# $DSH_HOME) and on-disk skills must not reach the worker's prompt.
+- id: agent-instructions
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+
+# Model-facing tools other than the jsre MCP tools.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-agent-team
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+
+# The jsre MCP server. `jsw run` replaces this row's config per run (container,
+# call budget, log path) with a --patch overlay. Booted without jsw, it points
+# at a container that does not exist and has no call budget, so it does nothing.
+- insert:
+    - id: mcp-jsre
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: jsre
+        transport: stdio
+        command: "@PROXY@"
+        args:
+          - --container
+          - jsw-unconfigured
+          - --max-calls
+          - "0"
+          - --log
+          - "@ROOT@/tmp/jsw-runs/direct-tools.jsonl"
+        toolCallTimeoutMs: 700000
+        failOnStartupError: true
+        reconnect:
+          enabled: false

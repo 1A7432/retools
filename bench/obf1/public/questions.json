@@ -1,0 +1,538 @@
+[
+ {
+  "id": "E01",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x10018d0"
+  ],
+  "question": "The function at 0x10018d0 takes two unsigned 32-bit arguments (first in edi, second in esi) and returns an unsigned 32-bit value. Give its return values for (x, y) = (5, 3), (0xFFFFFFFF, 0x80000001) and (0x12345678, 0x0F0F0F0F), in that order.",
+  "answer_format": "JSON list of 3 integers (decimal or 0x-hex strings)",
+  "difficulty": 1
+ },
+ {
+  "id": "E02",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x10018f0"
+  ],
+  "question": "The function at 0x10018f0 takes (pointer, length). Which well-known algorithm does it implement? Name it and give its parameters (initial value, multiplier, word size, and the order of the per-byte steps).",
+  "answer_format": "free text",
+  "difficulty": 2
+ },
+ {
+  "id": "E03",
+  "binary": "t1_easy",
+  "addresses": [],
+  "question": "What does the program print on its first output line when run with the single command-line argument `benchmark`?",
+  "answer_format": "exact text of the line",
+  "difficulty": 2
+ },
+ {
+  "id": "E04",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x10019e0"
+  ],
+  "question": "The function at 0x10019e0 takes two unsigned 32-bit arguments (x in edi, sel in esi). Give its return values for (x, sel) = (0x1000, 0), (0x1000, 1), (0xDEADBEEF, 6) and (7, 13), in that order.",
+  "answer_format": "JSON list of 4 integers",
+  "difficulty": 2
+ },
+ {
+  "id": "E05",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x1001a50"
+  ],
+  "question": "The function at 0x1001a50 takes one unsigned 32-bit argument (edi). Give its return values for 0, 1, 0x12345678 and 0x16e, in that order.",
+  "answer_format": "JSON list of 4 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "E06",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x1001b40",
+   "0x1001a20",
+   "0x1001a30",
+   "0x10019d0",
+   "0x1001b90"
+  ],
+  "question": "Which of the functions at 0x1001b40, 0x1001a20, 0x1001a30, 0x10019d0, 0x1001b90 can never execute, for any input to the program? Answer 'none' if all of them can execute.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "E07",
+  "binary": "t1_easy",
+  "addresses": [],
+  "question": "Give a command-line argument for which the program prints OK.",
+  "answer_format": "the argument as a JSON string",
+  "difficulty": 3
+ },
+ {
+  "id": "E08",
+  "binary": "t1_easy",
+  "addresses": [
+   "0x10019e0",
+   "0x10040c0"
+  ],
+  "question": "The function at 0x10019e0 calls through the four-entry table at 0x10040c0. Which entries of that table (give the target addresses) can never be selected by that function, for any argument values? Answer 'none' if every entry can be selected.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 2
+ },
+ {
+  "id": "E09",
+  "binary": "t1_easy",
+  "addresses": [],
+  "question": "How many distinct inputs (byte strings of any length) make the program print OK?",
+  "answer_format": "integer",
+  "difficulty": 3
+ },
+ {
+  "id": "M01",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001bb0",
+   "0x1001a80"
+  ],
+  "question": "The function at 0x1001bb0 computes a checksum of (pointer, length) using a table filled by the function at 0x1001a80. Name the algorithm precisely and give all of its parameters (polynomial and its bit order, initial value, final XOR, reflection).",
+  "answer_format": "free text",
+  "difficulty": 2
+ },
+ {
+  "id": "M02",
+  "binary": "t2_medium",
+  "addresses": [],
+  "question": "What does the program print on its first output line for the argument `123456789`, and for an empty argument (\"\")? Give both values.",
+  "answer_format": "JSON list of 2 integers (the printed hex values, e.g. \"0x1234abcd\")",
+  "difficulty": 2
+ },
+ {
+  "id": "M03",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001d80",
+   "0x1001ed0"
+  ],
+  "question": "Functions at 0x1001d80 and 0x1001ed0 look alike. Give a 32-bit input on which they return different values, or 'none' if they return the same value for every input.",
+  "answer_format": "integer, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "M04",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001d80",
+   "0x1002020"
+  ],
+  "question": "Functions at 0x1001d80 and 0x1002020 look alike. Give a 32-bit input on which they return different values, or 'none' if they return the same value for every input.",
+  "answer_format": "integer, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "M05",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001d80",
+   "0x1002170"
+  ],
+  "question": "Functions at 0x1001d80 and 0x1002170 look alike. Give a 32-bit input on which they return different values, or 'none' if they return the same value for every input.",
+  "answer_format": "integer, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "M06",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001d80"
+  ],
+  "question": "The function at 0x1001d80 takes one unsigned 32-bit argument (edi). Give its return values for 0, 1, 0x80000000 and 0xFFFFFFFF, in that order.",
+  "answer_format": "JSON list of 4 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "M07",
+  "binary": "t2_medium",
+  "addresses": [],
+  "question": "Give a command-line argument for which the program prints OK (on its last line).",
+  "answer_format": "the argument as a JSON string",
+  "difficulty": 4
+ },
+ {
+  "id": "M08",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1001990",
+   "0x1001a60",
+   "0x1002470",
+   "0x1002350",
+   "0x1001c80"
+  ],
+  "question": "Which of the functions at 0x1001990, 0x1001a60, 0x1002470, 0x1002350, 0x1001c80 can never execute, for any input to the program? Answer 'none' if all of them can execute.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "M09",
+  "binary": "t2_medium",
+  "addresses": [
+   "0x1002370"
+  ],
+  "question": "The function at 0x1002370 applies a fixed sequence of round functions to its argument. List, in call order, the address of the round function used at each step (one entry per call).",
+  "answer_format": "JSON list of addresses",
+  "difficulty": 3
+ },
+ {
+  "id": "M10",
+  "binary": "t2_medium_arm64",
+  "addresses": [
+   "0x1002020"
+  ],
+  "question": "t2_medium_arm64 is built from the same source as t2_medium. Which function in t2_medium_arm64 is the counterpart of the function at 0x1002020 in t2_medium? Give its address in t2_medium_arm64.",
+  "answer_format": "one address",
+  "difficulty": 2
+ },
+ {
+  "id": "M11",
+  "binary": "t2_medium_arm64",
+  "addresses": [
+   "0x1011348"
+  ],
+  "question": "In t2_medium_arm64, the function at 0x1011348 takes one unsigned 32-bit argument (w0). Assuming the program's start-up initialisation has already run (as it does before any call in main), give its return values for 1 and 0xA5A5A5A5.",
+  "answer_format": "JSON list of 2 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "H01",
+  "binary": "t3_hard",
+  "addresses": [],
+  "question": "What does the program print on its first output line for the argument `hello`?",
+  "answer_format": "integer",
+  "difficulty": 2
+ },
+ {
+  "id": "H02",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "main calls the function at 0x1002480 three times. What value does the first call return?",
+  "answer_format": "integer",
+  "difficulty": 4
+ },
+ {
+  "id": "H03",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "What does the program executed by the first call of 0x1002480 compute? Name the algorithm and give all of its parameters, and say how main uses the result.",
+  "answer_format": "free text",
+  "difficulty": 4
+ },
+ {
+  "id": "H04",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "What does the program executed by the second call of 0x1002480 compute, as a function of the program's input? Give the formula with all constants.",
+  "answer_format": "free text",
+  "difficulty": 4
+ },
+ {
+  "id": "H05",
+  "binary": "t3_hard",
+  "addresses": [],
+  "question": "Give a command-line argument for which the program prints OK.",
+  "answer_format": "the argument as a JSON string",
+  "difficulty": 5
+ },
+ {
+  "id": "H06",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "Suppose the interpreter's eight-entry register array holds r0..r7 = [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80] (r0 at index 0) and the interpreter executes exactly one instruction whose bytes, after the interpreter's fetch-time decoding, are [0xfa, 0x03, 0xf3]. Give r0..r7 afterwards.",
+  "answer_format": "JSON list of 8 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "H07",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "Suppose the interpreter's eight-entry register array holds r0..r7 = [0x0, 0xffffffff, 0xfffffffe, 0xf4243, 0x4, 0x5, 0x6, 0x7] (r0 at index 0) and the interpreter executes exactly one instruction whose bytes, after the interpreter's fetch-time decoding, are [0x1c, 0x12, 0x03]. Give r0..r7 afterwards.",
+  "answer_format": "JSON list of 8 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "H08",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "Suppose the interpreter's eight-entry register array holds r0..r7 = [0x11111111, 0x22222222, 0x80000001, 0x3, 0x4, 0x5, 0x6, 0x7] (r0 at index 0) and the interpreter executes exactly one instruction whose bytes, after the interpreter's fetch-time decoding, are [0xb2, 0x0a, 0x25]. Give r0..r7 afterwards.",
+  "answer_format": "JSON list of 8 integers",
+  "difficulty": 3
+ },
+ {
+  "id": "H09",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x10021f0",
+   "0x1002220",
+   "0x1001e20",
+   "0x10020a0",
+   "0x10023a0",
+   "0x1002010"
+  ],
+  "question": "Which of the functions at 0x10021f0, 0x1002220, 0x1001e20, 0x10020a0, 0x10023a0, 0x1002010 can never execute, for any input to the program? Answer 'none' if all of them can execute.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "H10",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1002480"
+  ],
+  "question": "Which opcode value, when executed by the interpreter, makes the interpreter itself print text (as opposed to main printing after a run returns)? Answer 'none' if no opcode does this.",
+  "answer_format": "opcode byte value, or \"none\"",
+  "difficulty": 2
+ },
+ {
+  "id": "H11",
+  "binary": "t3_hard",
+  "addresses": [
+   "0x1001f20"
+  ],
+  "question": "How many of the 256 possible opcode byte values (as seen after fetch-time decoding) cause the handler at 0x1001f20 to be called?",
+  "answer_format": "integer",
+  "difficulty": 3
+ },
+ {
+  "id": "C101",
+  "binary": "t4",
+  "addresses": [],
+  "question": "Which block cipher, mode of operation and padding scheme produce the ciphertext field of the output?",
+  "answer_format": "JSON object {\"cipher\": ..., \"mode\": ..., \"padding\": ...}",
+  "difficulty": 2
+ },
+ {
+  "id": "C102",
+  "binary": "t4",
+  "addresses": [
+   "0x1002340"
+  ],
+  "question": "The function at 0x1002340 hashes the message. Which hash family is it, and is it the standard algorithm? If it is not, give the 0-based index and the value of the constant that differs from the standard.",
+  "answer_format": "JSON object {\"hash\": ..., \"standard\": \"yes\"|\"no\", \"index\": int|null, \"value\": int|null}",
+  "difficulty": 3
+ },
+ {
+  "id": "C103",
+  "binary": "t4",
+  "addresses": [],
+  "question": "Give the 16-byte master key from which the program derives its cipher key.",
+  "answer_format": "hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C104",
+  "binary": "t4",
+  "addresses": [],
+  "question": "Each of the following 16-byte values appears in the binary's data or is a plausible reading of it: (A) 25705d39ba5bab47e0905a4cc0874b73; (B) 207bf742fe0ce079dc4e0dd7c2cb8a70; (C) 7ae94c6cbc62caf6953f5eb65aead648; (D) ca47945d6390e757bf2961516c421653. Which of them are NOT the master key from which the cipher key is derived?",
+  "answer_format": "JSON list of letters",
+  "difficulty": 3
+ },
+ {
+  "id": "C105",
+  "binary": "t4",
+  "addresses": [],
+  "question": "For the argument `abc`, give the 8-byte salt that enters the key derivation.",
+  "answer_format": "hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C106",
+  "binary": "t4",
+  "addresses": [
+   "0x1002b20"
+  ],
+  "question": "Describe the key derivation performed by the function at 0x1002b20. Give: the layout of the first hash input (using the names SALT, MASTER, DIGEST joined by ||), the layout of each later hash input, the total number of hash invocations, and the byte offset within the final digest at which the 16 key bytes start.",
+  "answer_format": "JSON object {\"first\": ..., \"later\": ..., \"invocations\": int, \"offset\": int}",
+  "difficulty": 4
+ },
+ {
+  "id": "C107",
+  "binary": "t4",
+  "addresses": [],
+  "question": "For the argument `abc`, give the 16-byte key passed to the block cipher.",
+  "answer_format": "hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C108",
+  "binary": "t4",
+  "addresses": [],
+  "question": "The output line is the hex encoding of three concatenated fields: the ciphertext (CT), an authentication tag (TAG) and the IV. Give their order and the TAG length in bytes.",
+  "answer_format": "JSON object {\"order\": \"X,Y,Z\", \"tag_len\": int}",
+  "difficulty": 3
+ },
+ {
+  "id": "C109",
+  "binary": "t4",
+  "addresses": [
+   "0x1002be0"
+  ],
+  "question": "The function at 0x1002be0 computes the tag. Give the underlying hash, the byte XORed into the key block for the inner hash, the byte XORed into the key block for the outer hash, and the layout of the authenticated data (names IV, CT joined by ||).",
+  "answer_format": "JSON object {\"hash\": ..., \"inner_pad\": int, \"outer_pad\": int, \"data\": ...}",
+  "difficulty": 3
+ },
+ {
+  "id": "C110",
+  "binary": "t4",
+  "addresses": [],
+  "question": "What exact line does the program print for the argument `hello`?",
+  "answer_format": "exact text",
+  "difficulty": 2
+ },
+ {
+  "id": "C111",
+  "binary": "t4",
+  "addresses": [],
+  "question": "What initial counter value does the block-cipher mode of the ciphertext field use? Answer 'none' if the mode uses no counter.",
+  "answer_format": "integer, or \"none\"",
+  "difficulty": 2
+ },
+ {
+  "id": "C112",
+  "binary": "t4",
+  "addresses": [],
+  "question": "For some argument the program printed the line b9b7df89b00973f8477e40c8c42a3eaaf2a37690dcd6b4008e497ee2afc36996e086224a68106acc70e1f837d265b2ef28b9d3bb769f5ce9ce797a6f . What was the argument?",
+  "answer_format": "the argument as a JSON string",
+  "difficulty": 4
+ },
+ {
+  "id": "C113",
+  "binary": "t4",
+  "addresses": [],
+  "question": "The 8 bytes f4d9b6c84daab4b9 are stored in the binary and are fed to a hash function at run time. Would replacing them with different bytes change the program's output for any input?",
+  "answer_format": "\"yes\" or \"no\"",
+  "difficulty": 2
+ },
+ {
+  "id": "C201",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Which elliptic curve does the program compute on? Give its standard name.",
+  "answer_format": "text",
+  "difficulty": 3
+ },
+ {
+  "id": "C202",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Give the affine coordinates of the public point used by the program's public-key encryption step.",
+  "answer_format": "JSON object {\"x\": hex, \"y\": hex}",
+  "difficulty": 4
+ },
+ {
+  "id": "C203",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Which one of these curve points is the public key actually used by the public-key encryption step? (A) x=247b7245105d29a40c88d63f4ef67f402b27a85b7e9e8f3af46c4a3e9d86f9eb y=93a54c799455c7971b54e281c5138fb511e00cf6737921dab9d3c2f5b6add23e; (B) x=27501e5c1da464122086803a46ba51f8ee38a59d7d8fada7f8e0536624161e50 y=154e43995aa9ecf2ce6ef03d58e81281bf9331d8635b1e73929096f129be55ff; (C) x=fd9a4113a7796336a0d132b65aad056e86008d7d8431ee5fa6dfe677fe04c740 y=7b3a5c3e49558e273cdfbd4d4f47fbbaa35d1b6fb84d61a59f5427fa3628fe2c; (D) x=bbcb928e1bcb4ea3c1c957caa8bb0f360270901da360ec0873ab91e69c9383fe y=34706d1bbbfb574614ec7c8d40d64de2e98e56eaff1ba9b87f8c324d786302e9; (E) x=27501e5c1da464122086803a46ba51f8ee38a59d7d8fada7f8e0536624161e50 y=eab1bc65a556130d31910fc2a717ed7e406cce269ca4e18d6d6f690ed641aa00;",
+  "answer_format": "one letter",
+  "difficulty": 3
+ },
+ {
+  "id": "C204",
+  "binary": "t5",
+  "addresses": [],
+  "question": "The public-key encryption step produces three components: an ephemeral curve point (POINT), the encrypted body (BODY) and a hash value (HASH). In what order are they laid out in its output, and does the point carry a leading format byte (give its value, or \"none\")?",
+  "answer_format": "JSON object {\"order\": \"X,Y,Z\", \"point_prefix\": int|\"none\"}",
+  "difficulty": 2
+ },
+ {
+  "id": "C205",
+  "binary": "t5",
+  "addresses": [],
+  "question": "For the argument `abc`, give the ephemeral scalar k used by the public-key encryption step.",
+  "answer_format": "32-byte hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C206",
+  "binary": "t5",
+  "addresses": [],
+  "question": "How is that ephemeral scalar derived from the input? Give the exact construction.",
+  "answer_format": "free text",
+  "difficulty": 4
+ },
+ {
+  "id": "C207",
+  "binary": "t5",
+  "addresses": [],
+  "question": "The message itself is encrypted with a symmetric cipher. Give the cipher, its key size in bits and the mode; if the mode uses a counter, the counter value used for the first block (else null); and if it uses an IV or nonce taken from elsewhere in the raw output (before any final text encoding), the byte offset in that raw output where it starts (else null).",
+  "answer_format": "JSON object {\"cipher\": ..., \"key_bits\": int, \"mode\": ..., \"first_counter\": int|null, \"iv_offset\": int|null}",
+  "difficulty": 3
+ },
+ {
+  "id": "C208",
+  "binary": "t5",
+  "addresses": [],
+  "question": "For the argument `abc`, give the 16-byte symmetric key.",
+  "answer_format": "hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C209",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Give the private scalar used by the signature step.",
+  "answer_format": "32-byte hex string",
+  "difficulty": 4
+ },
+ {
+  "id": "C210",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Before hashing the message, the signature step hashes an identity value together with curve and key data. What identity value is used?",
+  "answer_format": "text, or hex of its bytes",
+  "difficulty": 3
+ },
+ {
+  "id": "C211",
+  "binary": "t5",
+  "addresses": [],
+  "question": "Describe the final text encoding of the printed line: give the 64-character alphabet in index order, the size in bytes of the unit whose byte order is reversed before encoding (or \"none\"), and the padding character.",
+  "answer_format": "JSON object {\"alphabet\": str, \"swap_unit\": int|\"none\", \"pad\": str}",
+  "difficulty": 2
+ },
+ {
+  "id": "C212",
+  "binary": "t5",
+  "addresses": [],
+  "question": "For the argument `abc`, give the raw output bytes before the final text encoding and before any byte reordering.",
+  "answer_format": "hex string",
+  "difficulty": 3
+ },
+ {
+  "id": "C213",
+  "binary": "t5",
+  "addresses": [],
+  "question": "What exact line does the program print for the argument `hello`?",
+  "answer_format": "exact text",
+  "difficulty": 2
+ },
+ {
+  "id": "C214",
+  "binary": "t5",
+  "addresses": [],
+  "question": "What RSA modulus does the program use? Answer 'none' if it uses none.",
+  "answer_format": "hex, or \"none\"",
+  "difficulty": 2
+ }
+]

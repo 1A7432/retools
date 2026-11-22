@@ -1,0 +1,343 @@
+[
+ {
+  "id": "T1-01",
+  "target": "t1",
+  "question": "public/t1/app.js 是潮汐票务搜索页（public/t1/index.html）的前端脚本。页面调用 `TW.request(path, params)` 发起 GET 请求，并带上请求头 `X-Tw-Ts`（ts 的十进制字符串）、`X-Tw-Nonce`（nonce）和 `X-Tw-Sign`。用 Python 实现 `sign(params, ts, nonce)`：对任意合法输入，返回值必须与页面在同样的 params、ts、nonce 下发送的 `X-Tw-Sign` 逐字符相同（包括大小写）。参数约定见 public/README.md 的“签名函数通用约定”；X-Tw-Sign 只取决于 params、ts、nonce，与 path 无关。public/t1/samples.json 给出了 3 组抓包样本。",
+  "answer_format": "Python 文件：提交为 T1-01.py，定义 sign(params: dict[str, str], ts: int, nonce: str) -> str；answers.json 中该题的值写文件名 \"T1-01.py\"",
+  "difficulty": 2,
+  "impl": {
+   "function": "sign",
+   "signature": "sign(params: dict[str, str], ts: int, nonce: str) -> str",
+   "samples": "t1/samples.json"
+  }
+ },
+ {
+  "id": "T1-02",
+  "target": "t1",
+  "question": "页面以 params = {\"q\": \"演唱会\", \"page\": \"1\"}、ts = 1763712000000、nonce = \"a1b2c3d4e5f60718\" 发请求时，`X-Tw-Sign` 的值是什么？",
+  "answer_format": "64 个十六进制字符",
+  "difficulty": 1
+ },
+ {
+  "id": "T1-03",
+  "target": "t1",
+  "question": "X-Tw-Sign 的核心是一个基于某公开标准哈希算法构造的消息认证码，但页面使用的哈希实现与该标准有一个常量不同。请给出：algorithm——该标准哈希算法的名称；table——被改动的常量属于哪张表（\"K\" 表示各轮使用的轮常量表，\"H\" 表示初始哈希值）；index——它在该表中的下标（从 0 开始）；value——页面实际使用的 32 位值。",
+  "answer_format": "JSON 对象 {\"algorithm\": 字符串, \"table\": \"K\" 或 \"H\", \"index\": 整数, \"value\": 十六进制字符串}",
+  "difficulty": 3
+ },
+ {
+  "id": "T1-04",
+  "target": "t1",
+  "question": "计算 X-Tw-Sign 时使用的密钥是什么？以十六进制给出全部字节，字节顺序与送入计算时一致。",
+  "answer_format": "十六进制字符串",
+  "difficulty": 2
+ },
+ {
+  "id": "T1-05",
+  "target": "t1",
+  "question": "页面计算 X-Tw-Sign 时，会把由 params、ts、nonce 拼成的字符串转换成字节序列再送入哈希。若某个参数值中含有字符“😀”（U+1F600），这一个字符在该字节序列中占多少个字节？",
+  "answer_format": "整数",
+  "difficulty": 3
+ },
+ {
+  "id": "T1-06",
+  "target": "t1",
+  "question": "app.js 中的函数 `ꓯꓗ` 在任何一次 `TW.request` 调用的过程中是否会被执行？回答 yes 或 no。",
+  "answer_format": "yes 或 no",
+  "difficulty": 2
+ },
+ {
+  "id": "T2-01",
+  "target": "t2",
+  "question": "public/t2/app.js 是登录页（public/t2/index.html）的脚本。`TW.login(user, pwd)` 以 POST 发送 JSON 请求体 `{\"user\": user, \"pwd\": P}`。用 Python 实现 `encrypt_pwd(pwd, ts)`：返回页面在 Date.now() 返回 ts 时生成的 P，逐字符相同。pwd 是任意合法 Unicode 字符串（可以为空，不含孤立代理项）；ts 的约定见 public/README.md。public/t2/samples.json 中 T2-01 给出 3 组样本。",
+  "answer_format": "Python 文件：提交为 T2-01.py，定义 encrypt_pwd(pwd: str, ts: int) -> str；answers.json 中该题的值写文件名 \"T2-01.py\"",
+  "difficulty": 3,
+  "impl": {
+   "function": "encrypt_pwd",
+   "signature": "encrypt_pwd(pwd: str, ts: int) -> str",
+   "samples": "t2/samples.json"
+  }
+ },
+ {
+  "id": "T2-02",
+  "target": "t2",
+  "question": "`TW.login` 和 `TW.request(path, params)` 的请求头 `X-Tw-Sign` 由同一个函数计算（login 时 params 就是请求体对象 {user, pwd: P}）。用 Python 实现 `sign(params, ts, nonce)`，返回值与页面发送的 X-Tw-Sign 逐字符相同。参数约定见 public/README.md 的“签名函数通用约定”；与 path 无关。",
+  "answer_format": "Python 文件：提交为 T2-02.py，定义 sign(params: dict[str, str], ts: int, nonce: str) -> str；answers.json 中该题的值写文件名 \"T2-02.py\"",
+  "difficulty": 3,
+  "impl": {
+   "function": "sign",
+   "signature": "sign(params: dict[str, str], ts: int, nonce: str) -> str",
+   "samples": "t2/samples.json"
+  }
+ },
+ {
+  "id": "T2-03",
+  "target": "t2",
+  "question": "encrypt_pwd 内部使用了一个分组密码。请给出：cipher——该分组密码的标准名称；mode——工作模式（ecb、cbc、cfb、ofb、ctr、gcm 之一）；padding——填充方式（pkcs7、zero、iso7816-4、ansix923、iso10126、none 之一）。",
+  "answer_format": "JSON 对象 {\"cipher\": 字符串, \"mode\": 字符串, \"padding\": 字符串}",
+  "difficulty": 3
+ },
+ {
+  "id": "T2-04",
+  "target": "t2",
+  "question": "app.js 中有一处计算依赖某个函数自身的源码文本（通过 Function.prototype.toString 取得）。给出这个函数在 app.js 中的标识符。",
+  "answer_format": "标识符字符串（可以写成 app.js 中出现的任一形式，含 \\uXXXX 转义亦可）",
+  "difficulty": 4
+ },
+ {
+  "id": "T2-05",
+  "target": "t2",
+  "question": "把 public/t2/app.js 用代码格式化工具重新排版（只改变空白和换行，不改变任何语义），在同样的输入下运行，X-Tw-Sign 会不会改变？回答 yes 或 no。",
+  "answer_format": "yes 或 no",
+  "difficulty": 2
+ },
+ {
+  "id": "T2-06",
+  "target": "t2",
+  "question": "X-Tw-Sign 使用的哈希基于某公开标准哈希算法，但其初始值中有一个 32 位字与标准不同（指 app.js 未被改动时的取值）。请给出：algorithm——标准算法名称；index——该字在初始值序列中的下标（从 0 开始）；value——页面实际使用的值。",
+  "answer_format": "JSON 对象 {\"algorithm\": 字符串, \"index\": 整数, \"value\": 十六进制字符串}",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-01",
+  "target": "t3",
+  "question": "public/t3/app.js 是下单页脚本，签名在脚本内嵌的一个虚拟机里计算。`TW.request(path, params)` 发送 POST 请求，请求头含 `X-Tw-Ts`、`X-Tw-Nonce` 和 `X-Tw-Sig`。用 Python 实现 `sign(params, ts, nonce)`，返回值与页面发送的 X-Tw-Sig 逐字符相同。参数约定见 public/README.md 的“签名函数通用约定”；与 path 无关。",
+  "answer_format": "Python 文件：提交为 T3-01.py，定义 sign(params: dict[str, str], ts: int, nonce: str) -> str；answers.json 中该题的值写文件名 \"T3-01.py\"",
+  "difficulty": 4,
+  "impl": {
+   "function": "sign",
+   "signature": "sign(params: dict[str, str], ts: int, nonce: str) -> str",
+   "samples": "t3/samples.json"
+  }
+ },
+ {
+  "id": "T3-02",
+  "target": "t3",
+  "question": "app.js 内嵌的字节码数据在运行时才解密。给出解密使用的 16 字节密钥：十六进制，字节顺序与解密代码中密钥数组的下标顺序一致（下标 0 在前）。",
+  "answer_format": "32 个十六进制字符",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-03",
+  "target": "t3",
+  "question": "VM 用一张 256 项的表，按 opcode 字节值分发到处理函数；未定义的 opcode 都指向同一个“非法指令”处理函数。有多少个 opcode 值对应的处理函数不是这个非法指令处理函数？",
+  "answer_format": "整数",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-04",
+  "target": "t3",
+  "question": "在解密后的全部字节码中（包括初始化代码在内的所有函数），有多少种不同的 opcode 值实际作为指令的首字节出现过？",
+  "answer_format": "整数",
+  "difficulty": 4
+ },
+ {
+  "id": "T3-05",
+  "target": "t3",
+  "question": "opcode 0x16：设执行前操作数栈的栈顶为 3、紧挨栈顶的下一个元素为 10。执行这条指令后，栈顶的值是多少？",
+  "answer_format": "整数（可为负）",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-06",
+  "target": "t3",
+  "question": "opcode 0xed：同样设执行前栈顶为 3、紧挨栈顶的下一个元素为 10。执行这条指令后，栈顶的值是多少？",
+  "answer_format": "整数（可为负）",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-07",
+  "target": "t3",
+  "question": "字节码中有一段指令只在内部状态满足某个条件时才会执行。给出一个由 1 到 8 个小写英文字母组成的字符串 q，使得在 params = {\"q\": q}、ts = 1700000000000、nonce = \"0000000000000000\" 时，这段指令会被执行。",
+  "answer_format": "字符串（1–8 个 a–z）",
+  "difficulty": 4
+ },
+ {
+  "id": "T3-08",
+  "target": "t3",
+  "question": "下面四个 opcode 值中，哪些在解密后的字节码里从未作为指令首字节出现过？0x07、0x5c、0x81、0xf0。如果它们全都出现过，回答 none。",
+  "answer_format": "opcode 列表（JSON 数组）或 \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "T3-09",
+  "target": "t3",
+  "question": "params = {\"show\": \"S1024\", \"qty\": \"2\"}、ts = 1763712000000、nonce = \"00112233445566ff\" 时，`X-Tw-Sig` 的值是什么？",
+  "answer_format": "32 个十六进制字符",
+  "difficulty": 1
+ },
+ {
+  "id": "T4-01",
+  "target": "t4",
+  "question": "public/t4/app.js 是电子票页脚本。`TW.ticket(uid)` 以 Date.now() 为 ts 生成票据 token，并请求 `/api/v2/ticket?uid=<uid>&tk=<token>`。用 Python 实现 `make_token(uid, ts)`：uid 为整数，0 ≤ uid < 2^32；ts 的约定见 public/README.md；返回值与 tk 参数逐字符相同。",
+  "answer_format": "Python 文件：提交为 T4-01.py，定义 make_token(uid: int, ts: int) -> str；answers.json 中该题的值写文件名 \"T4-01.py\"",
+  "difficulty": 4,
+  "impl": {
+   "function": "make_token",
+   "signature": "make_token(uid: int, ts: int) -> str",
+   "samples": "t4/samples.json"
+  }
+ },
+ {
+  "id": "T4-02",
+  "target": "t4",
+  "question": "检票闸机要从 token 还原生成它的输入，页面里没有这段逻辑。用 Python 实现 `parse_token(token)`：token 是 16 个小写十六进制字符（任意取值，不一定出自页面）；返回 [uid, t]，使得对所有满足 ts mod 2^32 = t 的 ts 都有 make_token(uid, ts) == token，其中 0 ≤ uid < 2^32、0 ≤ t < 2^32。这样的 [uid, t] 对任意 token 都存在且唯一。",
+  "answer_format": "Python 文件：提交为 T4-02.py，定义 parse_token(token: str) -> list[int]  （[uid, t]，也可以返回二元组）；answers.json 中该题的值写文件名 \"T4-02.py\"",
+  "difficulty": 5,
+  "impl": {
+   "function": "parse_token",
+   "signature": "parse_token(token: str) -> list[int]  （[uid, t]，也可以返回二元组）",
+   "samples": "t4/samples.json"
+  }
+ },
+ {
+  "id": "T4-03",
+  "target": "t4",
+  "question": "抓到一个由该页面生成的 token：5184d73f5dd8bb12。生成它时的 uid 是多少？",
+  "answer_format": "整数",
+  "difficulty": 4
+ },
+ {
+  "id": "T4-04",
+  "target": "t4",
+  "question": "生成 token 的核心变换由若干轮结构相同的计算组成。一共有多少轮？",
+  "answer_format": "整数",
+  "difficulty": 3
+ },
+ {
+  "id": "T4-05",
+  "target": "t4",
+  "question": "最先执行的那一轮使用的 32 位轮密钥是多少？",
+  "answer_format": "十六进制字符串",
+  "difficulty": 4
+ },
+ {
+  "id": "T4-06",
+  "target": "t4",
+  "question": "该 VM 的源操作数以一个字节开头，这个字节的最高 2 位决定操作数的类别。给出四种类别各自对应的 2 位数值（0–3）：reg——编号小于 64 的寄存器；int——内联的小整数；const——常量池中的常量；wide——编号不小于 64 的寄存器。",
+  "answer_format": "JSON 对象 {\"reg\": 整数, \"int\": 整数, \"const\": 整数, \"wide\": 整数}",
+  "difficulty": 4
+ },
+ {
+  "id": "T4-07",
+  "target": "t4",
+  "question": "make_token 的结果是否依赖 ts 除以 2^32 的商（即 ts 超出低 32 位的那部分）？回答 yes 或 no。",
+  "answer_format": "yes 或 no",
+  "difficulty": 3
+ },
+ {
+  "id": "T4-08",
+  "target": "t4",
+  "question": "VM 分发表中，有多少个 opcode 值对应的处理函数不是非法指令处理函数，却从未在字节码中作为指令首字节出现过？",
+  "answer_format": "整数",
+  "difficulty": 4
+ },
+ {
+  "id": "T4-09",
+  "target": "t4",
+  "question": "uid = 88231、Date.now() 返回 1763712000000 时，`TW.ticket` 生成的 token 是什么？",
+  "answer_format": "16 个十六进制字符",
+  "difficulty": 1
+ },
+ {
+  "id": "T5-01",
+  "target": "t5",
+  "question": "public/t5/app.js 是结算页脚本，签名依赖浏览器环境。参考浏览器的环境取值见 public/t5/fingerprint.json，其余性质见 public/README.md 的“参考浏览器”。`TW.request(path, params)` 发送 POST 请求，请求头含 `X-Tw-Fp-Sign`。用 Python 实现 `sign(params, ts, nonce)`，返回参考浏览器中页面发送的 X-Tw-Fp-Sign，逐字符相同。参数约定见 public/README.md 的“签名函数通用约定”；与 path 无关。",
+  "answer_format": "Python 文件：提交为 T5-01.py，定义 sign(params: dict[str, str], ts: int, nonce: str) -> str；answers.json 中该题的值写文件名 \"T5-01.py\"",
+  "difficulty": 4,
+  "impl": {
+   "function": "sign",
+   "signature": "sign(params: dict[str, str], ts: int, nonce: str) -> str",
+   "samples": "t5/samples.json"
+  }
+ },
+ {
+  "id": "T5-02",
+  "target": "t5",
+  "question": "app.js 在计算签名前做了以下环境检测：A：用 Function.prototype.toString 检查 navigator.userAgent 的 getter；B：用 Function.prototype.toString 检查 HTMLCanvasElement.prototype.toDataURL；C：测量一条 debugger 语句前后 performance.now() 的差值；D：检查是否存在 Node.js 的 process 对象；E：读取 navigator.webdriver；F：统计 navigator 对象自身属性的个数。在参考浏览器以外的环境中，哪些检测点的结果会影响 X-Tw-Fp-Sign 的值？列出字母；若都不影响，回答 none。",
+  "answer_format": "字母列表（JSON 数组）或 \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "T5-03",
+  "target": "t5",
+  "question": "下列浏览器环境值中，哪些会参与 X-Tw-Fp-Sign 的计算？A navigator.userAgent；B navigator.language；C navigator.languages；D navigator.platform；E navigator.hardwareConcurrency；F screen.width；G screen.height；H screen.availHeight；I screen.colorDepth；J Date.prototype.getTimezoneOffset() 的返回值；K canvas 的 toDataURL() 返回值；L document.cookie。列出字母。",
+  "answer_format": "字母列表（JSON 数组）",
+  "difficulty": 3
+ },
+ {
+  "id": "T5-04",
+  "target": "t5",
+  "question": "设环境与参考浏览器完全相同，只有 navigator.webdriver 为 true。params = {\"order\": \"O20261117\", \"pay\": \"alipay\"}、ts = 1763712000000、nonce = \"0123456789abcdef\" 时，页面发送的 X-Tw-Fp-Sign 是什么？",
+  "answer_format": "32 个十六进制字符",
+  "difficulty": 4
+ },
+ {
+  "id": "T5-05",
+  "target": "t5",
+  "question": "VM 用一张 256 项的表按 opcode 字节值分发处理函数，未定义的 opcode 都指向同一个“非法指令”处理函数。有多少个 opcode 值对应的处理函数不是这个非法指令处理函数？",
+  "answer_format": "整数",
+  "difficulty": 3
+ },
+ {
+  "id": "T5-06",
+  "target": "t5",
+  "question": "下面三个 opcode 值中，哪些对应的是“非法指令”处理函数？0x02、0x2b、0x44。如果都不是，回答 none。",
+  "answer_format": "opcode 列表（JSON 数组）或 \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "T6-01",
+  "target": "t6",
+  "question": "public/t6/app.js 是支付页脚本，签名依赖浏览器环境。用 Python 实现 `sign(params, ts, nonce, env)`：env 是描述浏览器环境的 dict，键与 public/t6/fingerprint.json 相同，含义和取值范围见 public/README.md 的“t6 环境参数”；返回在由 env 描述的干净浏览器中，页面 `TW.request(path, params)` 发送的请求头 `X-Tw-Pay-Sign`，逐字符相同。参数约定见 public/README.md 的“签名函数通用约定”；与 path 无关。",
+  "answer_format": "Python 文件：提交为 T6-01.py，定义 sign(params: dict[str, str], ts: int, nonce: str, env: dict) -> str；answers.json 中该题的值写文件名 \"T6-01.py\"",
+  "difficulty": 5,
+  "impl": {
+   "function": "sign",
+   "signature": "sign(params: dict[str, str], ts: int, nonce: str, env: dict) -> str",
+   "samples": "t6/samples.json"
+  }
+ },
+ {
+  "id": "T6-02",
+  "target": "t6",
+  "question": "取 env 为 public/t6/fingerprint.json，params = {\"order\": \"P20261117001\", \"amount\": \"388.00\"}、ts = 1763712000000、nonce = \"5f1d0c2b9a7e4c33\"。给出一个不等于 8 的 hardwareConcurrency（1–128 的整数），使其余字段不变时签名与 hardwareConcurrency = 8 时完全相同；若不存在这样的值，回答 none。",
+  "answer_format": "整数或 \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "T6-03",
+  "target": "t6",
+  "question": "取 env 为 public/t6/fingerprint.json，params = {\"order\": \"P20261117001\", \"amount\": \"388.00\"}、ts = 1763712000000、nonce = \"5f1d0c2b9a7e4c33\"。给出一个不等于 1512 的 screenWidth（1–10000 的整数），使其余字段不变时签名与 screenWidth = 1512 时完全相同；若不存在这样的值，回答 none。",
+  "answer_format": "整数或 \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "T6-04",
+  "target": "t6",
+  "question": "env 的下列字段中，哪些不影响签名？A userAgent；B language；C platform；D hardwareConcurrency；E deviceMemory；F screenWidth；G screenHeight；H colorDepth；I timezoneOffset；J canvas；K webdriver。列出字母；若全部都影响，回答 none。",
+  "answer_format": "字母列表（JSON 数组）或 \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "T6-05",
+  "target": "t6",
+  "question": "签名计算过程中有以下环境检测：A：用 Function.prototype.toString 检查 Navigator.prototype 上某个属性的 getter；B：用 Function.prototype.toString 检查 Screen.prototype 上某个属性的 getter；C：检查是否存在 Node.js 的 process 对象；D：连续两次调用 performance.now() 并比较差值；E：统计 navigator 对象自身属性的个数；F：页面对 VM 解释器代码的源码文本求值，结果传入字节码。在干净浏览器以外的环境中，哪些检测点的结果会影响签名？列出字母；若都不影响，回答 none。",
+  "answer_format": "字母列表（JSON 数组）或 \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "T6-06",
+  "target": "t6",
+  "question": "字节码按属性名的 32 位哈希值查找 navigator 和 screen 上的属性。读取 navigator.language 时使用的哈希值是多少？",
+  "answer_format": "十六进制字符串",
+  "difficulty": 3
+ },
+ {
+  "id": "T6-07",
+  "target": "t6",
+  "question": "页面在调用 VM 之前，会对某个函数的源码文本求值并把结果传给字节码。给出这个函数在 app.js 中的标识符。",
+  "answer_format": "标识符字符串（可以写成 app.js 中出现的任一形式，含 \\uXXXX 转义亦可）",
+  "difficulty": 3
+ }
+]

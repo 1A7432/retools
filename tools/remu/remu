@@ -1,0 +1,8 @@
+#!/bin/sh
+# remu launcher. Starts the project's own virtualenv interpreter by path, with no
+# PATH lookups (no uv, no python3, no dirname), so it works from IDA's worker.
+case "$0" in
+  */*) here=${0%/*} ;;
+  *) here=$(command -v -- "$0"); here=${here%/*} ;;
+esac
+exec "$here/.venv/bin/python" -I "$here/src/remu_main.py" "$@"

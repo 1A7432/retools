@@ -1,0 +1,13 @@
+#!/bin/sh
+# rebox launcher: runs the project's own interpreter; no activation needed.
+# The `run` subcommand re-executes itself under sandbox-exec (see src/rebox/sandbox.py),
+# with this .venv for PE samples and with .venv-elf (built by `rebox setup-elf`) for ELF.
+set -eu
+DIR="$(cd "$(dirname "$0")" && pwd -P)"
+PY="$DIR/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+    UV="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
+    echo "rebox: creating environment with $UV sync --frozen" >&2
+    "$UV" sync --frozen --project "$DIR" >&2
+fi
+exec "$PY" -I -B -m rebox "$@"

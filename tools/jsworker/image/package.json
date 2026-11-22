@@ -1,0 +1,14 @@
+{
+  "name": "jsre-tools",
+  "private": true,
+  "description": "AST libraries preinstalled read-only at /opt/jsre/node_modules in the jsvm1-tools image",
+  "dependencies": {
+    "@babel/generator": "7.29.14",
+    "@babel/parser": "7.29.14",
+    "@babel/traverse": "7.29.14",
+    "@babel/types": "7.29.14",
+    "acorn": "8.19.0",
+    "acorn-walk": "8.3.5",
+    "astring": "1.9.0"
+  }
+}

@@ -1,0 +1,491 @@
+[
+ {
+  "id": "I01",
+  "binary": "b1",
+  "addresses": [
+   "0x1001a80"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The function at 0x1001a80 takes one unsigned 64-bit argument (rdi) and returns an unsigned 64-bit value (rax). Give its return values for the arguments 0, 1 and 0x0123456789abcdef, in that order.",
+  "answer_format": "JSON list of 3 integers (decimal or 0x-hex strings)",
+  "difficulty": 1
+ },
+ {
+  "id": "I02",
+  "binary": "b1",
+  "addresses": [],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument ARG of exactly 16 lowercase hexadecimal digits for which running `b1 k ARG` prints `OK` as its last line. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string (16 lowercase hex digits), or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "I04",
+  "binary": "b1",
+  "addresses": [
+   "0x1001d60",
+   "0x1001c30"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The function at 0x1001d60 computes a 32-bit table-driven CRC over (pointer, length), with a 256-entry table that the function at 0x1001c30 fills. Give its parameters: poly = the generator polynomial (either the reflected form the table is built from, or the normal form), init = the register value before the first byte, xorout = the value XORed into the register after the last byte.",
+  "answer_format": "JSON object {\"poly\": int, \"init\": int, \"xorout\": int}",
+  "difficulty": 3
+ },
+ {
+  "id": "I03",
+  "binary": "b1",
+  "addresses": [],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument ARG of exactly 8 lowercase hexadecimal digits for which running `b1 c ARG` prints `OK` as its last line. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string (8 lowercase hex digits), or \"none\"",
+  "difficulty": 5
+ },
+ {
+  "id": "I05",
+  "binary": "b1",
+  "addresses": [
+   "0x1002000",
+   "0x1002050",
+   "0x10020a0",
+   "0x10020e0",
+   "0x1001fe0",
+   "0x10020c0"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Which of the functions at 0x1002000, 0x1002050, 0x10020a0, 0x10020e0, 0x1001fe0, 0x10020c0 can never execute, whatever command-line arguments `b1` is run with? Answer \"none\" if each of them executes for some arguments.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "I06",
+  "binary": "b1",
+  "addresses": [
+   "0x1002050"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give a decimal argument N (0 to 4294967295, no leading '+' or spaces) for which running `b1 n N` executes the function at 0x1002050. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string of decimal digits, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "I07",
+  "binary": "b1",
+  "addresses": [
+   "0x1002000"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give a decimal argument N (0 to 4294967295, no leading '+' or spaces) for which running `b1 n N` executes the function at 0x1002000. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string of decimal digits, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "I08",
+  "binary": "b1",
+  "addresses": [
+   "0x1001e80",
+   "0x1001f20"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The functions at 0x1001e80 and 0x1001f20 each take one unsigned 64-bit argument (rdi) and return an unsigned 64-bit value (rax). Give an argument for which they return different values, or \"none\" if they return the same value for every argument.",
+  "answer_format": "integer (decimal or 0x-hex string), or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "I09",
+  "binary": "b1",
+  "addresses": [
+   "0x1001e80",
+   "0x1001ec0"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The functions at 0x1001e80 and 0x1001ec0 each take one unsigned 64-bit argument (rdi) and return an unsigned 64-bit value (rax). Give an argument for which they return different values, or \"none\" if they return the same value for every argument.",
+  "answer_format": "integer (decimal or 0x-hex string), or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "I10",
+  "binary": "b1",
+  "addresses": [
+   "0x1001e80",
+   "0x1001f80"
+  ],
+  "question": "[b1: Linux x86-64 executable, invoked as `b1 k ARG`, `b1 c ARG` or `b1 n ARG`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The functions at 0x1001e80 and 0x1001f80 each take one unsigned 64-bit argument (rdi) and return an unsigned 64-bit value (rax). Give an argument for which they return different values, or \"none\" if they return the same value for every argument.",
+  "answer_format": "integer (decimal or 0x-hex string), or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "F01",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let B be the specification `rounds=5;tag=bench;id=1a2b3c4d;pad=7;salt=00c0ffee;seed=5eed1234;mode=0`. What exactly does `b2 B` print (its whole output line)?",
+  "answer_format": "JSON string (the line)",
+  "difficulty": 1
+ },
+ {
+  "id": "F02",
+  "binary": "b2",
+  "addresses": [
+   "0x1001df0"
+  ],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let B be the specification `rounds=5;tag=bench;id=1a2b3c4d;pad=7;salt=00c0ffee;seed=5eed1234;mode=0`. The function at 0x1001df0 fills a context structure whose address is its first argument (rdi). At which byte offset from the start of that structure is the value of the key `rounds` stored?",
+  "answer_format": "integer",
+  "difficulty": 3
+ },
+ {
+  "id": "F03",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let B be the specification `rounds=5;tag=bench;id=1a2b3c4d;pad=7;salt=00c0ffee;seed=5eed1234;mode=0`. Which keys of B can change the F1 field of the output when that key alone is given another value (all other keys as in B) for which b2 still prints its F0/F1/F2 line? A key counts if at least one such alternative value changes F1.",
+  "answer_format": "JSON list of key names, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "F04",
+  "binary": "b2",
+  "addresses": [
+   "0x1002653"
+  ],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let B be the specification `rounds=5;tag=bench;id=1a2b3c4d;pad=7;salt=00c0ffee;seed=5eed1234;mode=0`. When `b2 B` runs, the indirect call instruction at 0x1002653 is executed several times. List, in execution order, the address of the function it calls each time (one entry per execution).",
+  "answer_format": "JSON list of addresses",
+  "difficulty": 3
+ },
+ {
+  "id": "F05",
+  "binary": "b2",
+  "addresses": [
+   "0x1002653",
+   "0x10024b0"
+  ],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give a specification S for which running `b2 S` makes the indirect call instruction at 0x1002653 call the function at 0x10024b0 at least once. Answer \"none\" if no specification does.",
+  "answer_format": "JSON string (the specification), or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "F06",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let B be the specification `rounds=5;tag=bench;id=1a2b3c4d;pad=7;salt=00c0ffee;seed=5eed1234;mode=0`. Give a value V of exactly 8 lowercase hexadecimal digits such that running `b2` with B's `salt=00c0ffee` replaced by `salt=V` (everything else unchanged) prints a line beginning `F0=00000000 `. Answer \"none\" if no such value exists.",
+  "answer_format": "JSON string (8 lowercase hex digits), or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "F07",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] b2 accepts the keys id, mode, salt, rounds, tag, pad and seed. Which of them can never affect any field of the output line, for any specification that b2 accepts (that is, one for which it prints the F0/F1/F2 line)? Answer \"none\" if every key can affect the output.",
+  "answer_format": "JSON list of key names, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "F08",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Consider specifications that b2 accepts and in which each key appears at most once. Can reordering the key=value pairs of such a specification change any of the fields F0, F1, F2? List the fields that can change, or answer \"none\".",
+  "answer_format": "JSON list of field names, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "F09",
+  "binary": "b2",
+  "addresses": [],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give a specification S for which running `b2 S` prints exactly the single line `E:3`. Answer \"none\" if no specification does.",
+  "answer_format": "JSON string (the specification), or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "F10",
+  "binary": "b2",
+  "addresses": [
+   "0x1002653"
+  ],
+  "question": "[b2: Linux x86-64 executable, invoked as `b2 SPEC` with one argument of the form key=value;key=value (pairs separated by semicolons). 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Over all specifications that b2 accepts, how many distinct functions can the indirect call instruction at 0x1002653 call?",
+  "answer_format": "integer",
+  "difficulty": 4
+ },
+ {
+  "id": "P01",
+  "binary": "b3",
+  "addresses": [],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let X be the argument list [\"r:beta:3\", \"l:alpha:7\", \"a:gamma:alpha\", \"p:beta:x=5\", \"l:beta:9\", \"a:delta:beta\"]. What does b3 print on its second output line when run with the arguments X?",
+  "answer_format": "JSON string (the line)",
+  "difficulty": 1
+ },
+ {
+  "id": "P02",
+  "binary": "b3",
+  "addresses": [
+   "0x100e140"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Objects of the class whose RTTI type name is `4Rule` are constructed by the function at 0x100e140. Give (a) the size in bytes of a complete object of that class and (b) the byte offset, within a complete object, of its base-class subobject of the class whose RTTI type name is `4Node`.",
+  "answer_format": "JSON object {\"size\": int, \"node_offset\": int}",
+  "difficulty": 3
+ },
+ {
+  "id": "P03",
+  "binary": "b3",
+  "addresses": [
+   "0x10322e0",
+   "0x1032188"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Using the program's RTTI, give the direct base classes of the class with type name `4Rule` and of the class with type name `5Named`, and for each of the two, which of its direct base classes are virtual. Name classes by RTTI type name (for example `4Node`).",
+  "answer_format": "JSON object {\"rule_bases\": [...], \"rule_virtual\": [...], \"named_bases\": [...], \"named_virtual\": [...]} (empty list for none)",
+  "difficulty": 3
+ },
+ {
+  "id": "P04",
+  "binary": "b3",
+  "addresses": [
+   "0x100f841"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let X be the argument list [\"r:beta:3\", \"l:alpha:7\", \"a:gamma:alpha\", \"p:beta:x=5\", \"l:beta:9\", \"a:delta:beta\"]. When b3 runs with the arguments X, the indirect call instruction at 0x100f841 is executed several times. List, in execution order, the address each execution transfers control to (if that is a thunk, give the thunk's own address).",
+  "answer_format": "JSON list of addresses",
+  "difficulty": 4
+ },
+ {
+  "id": "P05",
+  "binary": "b3",
+  "addresses": [
+   "0x100e360"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The function at 0x100e360 adjusts its `this` pointer (rdi) and transfers control elsewhere. Give the address it transfers control to, and the signed byte offset, relative to the address held in the object's vtable pointer, of the vtable entry from which it reads the adjustment.",
+  "answer_format": "JSON object {\"target\": address, \"vcall_offset\": int}",
+  "difficulty": 3
+ },
+ {
+  "id": "P06",
+  "binary": "b3",
+  "addresses": [
+   "0x100e810",
+   "0x100e780",
+   "0x100e0b0",
+   "0x100dee0",
+   "0x100e080",
+   "0x100e010"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Which of the functions at 0x100e810, 0x100e780, 0x100e0b0, 0x100dee0, 0x100e080, 0x100e010 can never execute, whatever arguments b3 is run with? Answer \"none\" if each of them executes for some arguments.",
+  "answer_format": "JSON list of addresses, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "P07",
+  "binary": "b3",
+  "addresses": [
+   "0x10375c0",
+   "0x100f7f0"
+  ],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Let X be the argument list [\"r:beta:3\", \"l:alpha:7\", \"a:gamma:alpha\", \"p:beta:x=5\", \"l:beta:9\", \"a:delta:beta\"]. When b3 runs with the arguments X, consider the 24-byte object at 0x10375c0 at the moment the first call of the function at 0x100f7f0 begins. Give (a) the value of its 8-byte word at offset 16, (b) the key string stored in the tree node that its 8-byte word at offset 0 points to, and (c) the key string stored in the tree node that its 8-byte word at offset 8 points to.",
+  "answer_format": "JSON object {\"word16\": int, \"word0_key\": string, \"word8_key\": string}",
+  "difficulty": 4
+ },
+ {
+  "id": "P08",
+  "binary": "b3",
+  "addresses": [],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] b3 keeps token names in std::string objects, which use the C++ library's small-string optimisation. What is the largest name length, in bytes, for which such a std::string keeps its characters inside the string object itself (no separate heap allocation)?",
+  "answer_format": "integer",
+  "difficulty": 2
+ },
+ {
+  "id": "P09",
+  "binary": "b3",
+  "addresses": [],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument list (1 to 16 tokens) for which the last line b3 prints begins with `E2 `. Answer \"none\" if no argument list does.",
+  "answer_format": "JSON list of strings, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "P10",
+  "binary": "b3",
+  "addresses": [],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument list (1 to 16 tokens) for which the last line b3 prints begins with `E3 `. Answer \"none\" if no argument list can produce such a line.",
+  "answer_format": "JSON list of strings, or \"none\"",
+  "difficulty": 3
+ },
+ {
+  "id": "P11",
+  "binary": "b3",
+  "addresses": [],
+  "question": "[b3: Linux x86-64 executable, a C++ program invoked with 1 to 16 command-line arguments called tokens. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument list of 1 to 4 tokens for which b3 prints `sum=0000beef` as its second line. Answer \"none\" if no such list exists.",
+  "answer_format": "JSON list of strings, or \"none\"",
+  "difficulty": 4
+ },
+ {
+  "id": "A01",
+  "binary": "b4_arm64",
+  "addresses": [],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] What does `b4_arm64 a575e3b7c8e3e6cb` print on its first line?",
+  "answer_format": "JSON string (the line)",
+  "difficulty": 4
+ },
+ {
+  "id": "A02",
+  "binary": "b4_arm64",
+  "addresses": [],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument ARG (16 lowercase hexadecimal digits) for which running `b4_arm64 ARG` prints `OK` as its last line. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string (16 lowercase hex digits), or \"none\"",
+  "difficulty": 5
+ },
+ {
+  "id": "A03",
+  "binary": "b4_arm64",
+  "addresses": [
+   "0x1010970"
+  ],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give the 32 bytes starting at address 0x1010970 as they are in memory when main begins executing, in a run of `b4_arm64 a575e3b7c8e3e6cb`.",
+  "answer_format": "hex string (32 bytes)",
+  "difficulty": 4
+ },
+ {
+  "id": "A04",
+  "binary": "b4_arm64",
+  "addresses": [
+   "0x1010cf8"
+  ],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] In a run of `b4_arm64 a575e3b7c8e3e6cb`, the indirect call instruction at 0x1010cf8 is executed four times. List the addresses of the functions it calls, in order.",
+  "answer_format": "JSON list of 4 addresses",
+  "difficulty": 4
+ },
+ {
+  "id": "A05",
+  "binary": "b4_arm64",
+  "addresses": [
+   "0x10108e8"
+  ],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Is the function at 0x10108e8 executed in a run of b4_arm64 for some argument? Answer yes or no.",
+  "answer_format": "\"yes\" or \"no\"",
+  "difficulty": 3
+ },
+ {
+  "id": "A06",
+  "binary": "b4_arm64",
+  "addresses": [
+   "0x1010cf8"
+  ],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Over all valid arguments, how many distinct functions can the indirect call instruction at 0x1010cf8 call in a run of b4_arm64?",
+  "answer_format": "integer",
+  "difficulty": 4
+ },
+ {
+  "id": "A07",
+  "binary": "b4_arm64",
+  "addresses": [
+   "0x1010970"
+  ],
+  "question": "[b4_arm64: Linux AArch64 executable, invoked as `b4_arm64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux AArch64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Consider the function at 0x1010970 as it is in memory when main begins executing in a run of b4_arm64. What does it return when called with the argument 0, and with the argument 1 (x0, unsigned 64-bit)? Give both values, in that order.",
+  "answer_format": "JSON list of 2 integers",
+  "difficulty": 4
+ },
+ {
+  "id": "X01",
+  "binary": "b4_x64",
+  "addresses": [],
+  "question": "[b4_x64: Linux x86-64 executable, invoked as `b4_x64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] What does `b4_x64 327309ab064aab44` print on its first line?",
+  "answer_format": "JSON string (the line)",
+  "difficulty": 4
+ },
+ {
+  "id": "X02",
+  "binary": "b4_x64",
+  "addresses": [],
+  "question": "[b4_x64: Linux x86-64 executable, invoked as `b4_x64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give an argument ARG (16 lowercase hexadecimal digits) for which running `b4_x64 ARG` prints `OK` as its last line. Answer \"none\" if no such argument exists.",
+  "answer_format": "JSON string (16 lowercase hex digits), or \"none\"",
+  "difficulty": 5
+ },
+ {
+  "id": "X03",
+  "binary": "b4_x64",
+  "addresses": [
+   "0x10019d0"
+  ],
+  "question": "[b4_x64: Linux x86-64 executable, invoked as `b4_x64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Give the 32 bytes starting at address 0x10019d0 as they are in memory when main begins executing, in a run of `b4_x64 327309ab064aab44`.",
+  "answer_format": "hex string (32 bytes)",
+  "difficulty": 4
+ },
+ {
+  "id": "X04",
+  "binary": "b4_x64",
+  "addresses": [
+   "0x1001d2c"
+  ],
+  "question": "[b4_x64: Linux x86-64 executable, invoked as `b4_x64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] In a run of `b4_x64 327309ab064aab44`, the indirect call instruction at 0x1001d2c is executed four times. List the addresses of the functions it calls, in order.",
+  "answer_format": "JSON list of 4 addresses",
+  "difficulty": 4
+ },
+ {
+  "id": "X05",
+  "binary": "b4_x64",
+  "addresses": [
+   "0x1001d2c"
+  ],
+  "question": "[b4_x64: Linux x86-64 executable, invoked as `b4_x64 ARG` where ARG is 16 lowercase hexadecimal digits. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Over all valid arguments, how many distinct functions can the indirect call instruction at 0x1001d2c call in a run of b4_x64?",
+  "answer_format": "integer",
+  "difficulty": 4
+ },
+ {
+  "id": "K01",
+  "binary": "b5",
+  "addresses": [],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] What does `b5 abc` print on its first line?",
+  "answer_format": "JSON string (the line)",
+  "difficulty": 1
+ },
+ {
+  "id": "K02",
+  "binary": "b5",
+  "addresses": [
+   "0x1001c70"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] When the function at 0x1001c70 runs, is the 256-byte substitution table it reads the standard AES S-box? Give standard = yes or no and, if no, the 0-based indices and the values of every entry that differs from the standard (empty lists if yes).",
+  "answer_format": "JSON object {\"standard\": \"yes\"|\"no\", \"index\": [ints], \"value\": [ints]}",
+  "difficulty": 3
+ },
+ {
+  "id": "K03",
+  "binary": "b5",
+  "addresses": [
+   "0x1001920"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] Is the hash computed by the function at 0x1001920 standard SHA-256? Give standard = yes or no and, if no, the 0-based indices and the values of every SHA-256 round constant that differs from the standard (empty lists if yes).",
+  "answer_format": "JSON object {\"standard\": \"yes\"|\"no\", \"index\": [ints], \"value\": [ints]}",
+  "difficulty": 4
+ },
+ {
+  "id": "K04",
+  "binary": "b5",
+  "addresses": [
+   "0x1002290"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The function at 0x1002290 is built from a ChaCha-style quarter round applied in column and diagonal rounds. Give the four rotate-left amounts of its quarter round in the order they are applied, and the number of double rounds (one column round plus one diagonal round).",
+  "answer_format": "JSON object {\"rotations\": [4 ints], \"double_rounds\": int}",
+  "difficulty": 3
+ },
+ {
+  "id": "K05",
+  "binary": "b5",
+  "addresses": [
+   "0x1002290"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] The function at 0x1002290 initialises words 0 to 3 of its 16-word state with four 32-bit values that do not depend on its arguments. Which of those four values (0-based positions) differ from the standard ChaCha20 constant words (\"expand 32-byte k\")? Answer \"none\" if none differ.",
+  "answer_format": "JSON list of ints, or \"none\"",
+  "difficulty": 2
+ },
+ {
+  "id": "K06",
+  "binary": "b5",
+  "addresses": [],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] For some PIN of exactly 8 decimal digits, `b5 -p PIN` printed `P=e0a1242a`. Give PIN. Answer \"none\" if no 8-digit PIN produces that line.",
+  "answer_format": "JSON string (8 decimal digits), or \"none\"",
+  "difficulty": 5
+ },
+ {
+  "id": "K07",
+  "binary": "b5",
+  "addresses": [
+   "0x1002290"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] When `b5 abc` runs, what 32-byte key does the function at 0x1002290 receive (through its first argument)?",
+  "answer_format": "hex string (32 bytes)",
+  "difficulty": 3
+ },
+ {
+  "id": "K08",
+  "binary": "b5",
+  "addresses": [
+   "0x1001c70"
+  ],
+  "question": "[b5: Linux x86-64 executable, invoked as `b5 MESSAGE` or `b5 -p PIN`. 'Run' means native execution on Linux x86-64 with no debugger or tracer attached, exactly the command-line arguments given (each JSON string is one argument) and empty standard input. Addresses are virtual addresses as they appear in the file.] What 16-byte key does the function at 0x1001c70 use when b5 runs with one argument (message mode)?",
+  "answer_format": "hex string (16 bytes)",
+  "difficulty": 3
+ }
+]

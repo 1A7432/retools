@@ -1,0 +1,60 @@
+{
+ "T2-01": [
+  {
+   "args": [
+    "Tidewell2026",
+    1763712000123
+   ],
+   "out": "BuG9RpLxAomM1oaH5452ef"
+  },
+  {
+   "args": [
+    "p@ssw0rd!",
+    1763715600456
+   ],
+   "out": "gUPjX4qHq3yeO3s5w7LXVx"
+  },
+  {
+   "args": [
+    "海潮-778",
+    1763719200789
+   ],
+   "out": "yWHP6GXpNV4pz7enCPVvyM"
+  }
+ ],
+ "T2-02": [
+  {
+   "args": [
+    {
+     "user": "13800138000",
+     "pwd": "BuG9RpLxAomM1oaH5452ef"
+    },
+    1763712000123,
+    "751291d0ba7bc37b"
+   ],
+   "out": "2150837EFB67AEF0E5547ABCD44DB61FA659F937CF17FF190160715C0A4DA706"
+  },
+  {
+   "args": [
+    {
+     "user": "user@example.invalid",
+     "pwd": "gUPjX4qHq3yeO3s5w7LXVx"
+    },
+    1763715600456,
+    "95dff01cc4bec21b"
+   ],
+   "out": "E50A0C26AC48F3850322174B1F0907CD74C08423A435B370A1E17FBAAAEF8160"
+  },
+  {
+   "args": [
+    {
+     "user": "18612345678",
+     "pwd": "yWHP6GXpNV4pz7enCPVvyM"
+    },
+    1763719200789,
+    "ef113e98667f28a8"
+   ],
+   "out": "2D073C7BA7D36DB15EA7F9A3C4D0E054DCCE38F9E2AACEA0AA2AE2A390440DF7"
+  }
+ ]
+}

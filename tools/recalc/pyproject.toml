@@ -1,0 +1,20 @@
+[project]
+name = "recalc"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "Restricted calculator for checking arithmetic and crypto hypotheses during reverse engineering"
+# The tool itself uses the standard library only; the packages below are
+# independent reference implementations used by the tests.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "cryptography>=42",
+    "pycryptodome>=3.20",
+    "gmssl>=3.2.2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

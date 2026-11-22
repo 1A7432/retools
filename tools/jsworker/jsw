@@ -1,0 +1,1163 @@
+#!/usr/bin/env python3
+"""jsw: run one target of a JS reverse-engineering benchmark with a worker model
+in a sandbox container (see bench/jsvm1/HARNESS.md).
+
+    jsw setup                      create or refresh the dsh profile `js-worker`
+    jsw doctor                     check dsh, the profile, the image and which
+                                   tools dsh offers the model
+    jsw run --target tN [--model ID] [--effort low|high|max] [--timeout SECONDS]
+            [--max-calls N] [--bench DIR]
+    jsw resume RUN_ID [--prompt TEXT] [--timeout SECONDS]
+    jsw merge RUN_ID... -o DIR [--force]
+    jsw gc [--dry-run]             remove containers left by runs that died
+
+`jsw run` stages the target into tmp/jsw-runs/<run-id>/, starts a container
+(no network, read-only root, only public/ and work/ mounted), runs dsh with the
+js-worker profile whose only tools are jsre_mcp.py's, then exports
+work/submission/ to <run>/submission/, audits the tool log, removes the
+container and prints summary.json. Exit 0: the worker finished and the audit
+is clean; 1: the worker did not finish (timeout, error); 2: the run could not
+start; 3: the audit found something that should have been impossible.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import posixpath
+import re
+import secrets
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+REWORKER = os.path.normpath(os.path.join(HERE, "..", "reworker"))
+sys.path.insert(0, HERE)
+sys.path.insert(0, REWORKER)
+
+import backend_dsh  # noqa: E402
+import jsre_mcp  # noqa: E402
+
+RE_DIR = os.path.normpath(os.path.join(HERE, "..", ".."))
+RUNS = os.environ.get("JSW_RUNS") or os.path.join(RE_DIR, "tmp", "jsw-runs")
+BENCH = os.path.join(RE_DIR, "bench", "jsvm1")
+JSRE = os.path.join(HERE, "jsre_mcp.py")
+PATCH = os.path.join(HERE, "profile", "cordis.patch.yml")
+IMAGE_TAG = "jsvm1-tools:1"
+IMAGE_DIGEST = os.path.join(HERE, "image", "IMAGE_DIGEST")
+DOCKER = os.environ.get("JSW_DOCKER") or shutil.which("docker") or "/usr/local/bin/docker"
+PROFILE = "js-worker"
+SERVER = "jsre"
+MCP_ROW = "mcp-jsre"
+TOOL_NAMES = sorted("mcp__%s__%s" % (SERVER, t) for t in jsre_mcp.TOOL_NAMES)
+TOOL_ROWS = backend_dsh.TOOL_ROWS + ["agent-instructions", "skill-filesystem"]
+DEFAULT_TIMEOUT = 7200
+DEFAULT_MAX_CALLS = 400
+DEFAULT_EFFORT = "max"
+TOOL_TIMEOUT_MS = 700000      # above node_run/py_run's 600 s limit plus docker overhead
+MAX_SUBMISSION_FILE = 2 << 20
+COMMANDS = ("setup", "doctor", "run", "resume", "merge", "gc")
+RESUME_PROMPT = (
+    "Your previous session was interrupted. Continue the same task: your files in "
+    "/task/work are as you left them and the questions are unchanged. Finish what is "
+    "still open, keep /task/work/submission/ up to date, run submit_check, then give "
+    "your final reply.")
+
+
+def emit(obj):
+    print(json.dumps(obj, ensure_ascii=False, indent=2))
+
+
+def load_json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# --------------------------------------------------------------------------
+# docker
+# --------------------------------------------------------------------------
+
+def docker(*args, timeout=120):
+    try:
+        p = subprocess.run([DOCKER] + list(args), capture_output=True, text=True,
+                           timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 255, "", str(exc)
+    return p.returncode, p.stdout, p.stderr
+
+
+def docker_host():
+    """The endpoint of the current docker context, passed on to jsre_mcp.py so it
+    does not depend on the environment dsh gives its MCP servers."""
+    if os.environ.get("DOCKER_HOST"):
+        return os.environ["DOCKER_HOST"]
+    rc, out, _ = docker("context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def expected_image():
+    try:
+        with open(IMAGE_DIGEST) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def image_problems():
+    want = expected_image()
+    if not want:
+        return ["%s is missing; build the image with image/build.sh" % IMAGE_DIGEST]
+    rc, out, err = docker("image", "inspect", "--format", "{{.Id}}", IMAGE_TAG)
+    if rc != 0:
+        return ["image %s is not present (%s); run image/build.sh"
+                % (IMAGE_TAG, (err or out).strip()[-200:])]
+    if out.strip() != want:
+        return ["image %s is %s but IMAGE_DIGEST says %s; rebuild or update IMAGE_DIGEST"
+                % (IMAGE_TAG, out.strip(), want)]
+    return []
+
+
+def container_name(run_id):
+    return "jsw-" + run_id
+
+
+def start_container(run_id, run_dir, image):
+    """docker run as in HARNESS.md section 4. Returns (name, problems)."""
+    name = container_name(run_id)
+    pub = os.path.realpath(os.path.join(run_dir, "public"))
+    work = os.path.realpath(os.path.join(run_dir, "work"))
+    rc, out, err = docker(
+        "run", "-d", "--name", name, "--label", "jsw.run=%s" % run_id,
+        "--label", "jsw.pid=%d" % os.getpid(),
+        "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,size=256m",
+        "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--memory", "4g", "--cpus", "2", "--pids-limit", "128",
+        "-e", "TZ=UTC", "-e", "LANG=C.UTF-8",
+        "-v", "%s:/task/public:ro" % pub, "-v", "%s:/task/work:rw" % work,
+        image, "sleep", "infinity")
+    if rc != 0:
+        return name, ["docker run failed: %s" % (err or out).strip()[-500:]]
+    return name, verify_container(inspect_container(name), run_dir, image)
+
+
+def inspect_container(name):
+    rc, out, err = docker("inspect", name)
+    if rc != 0:
+        return None
+    try:
+        return json.loads(out)[0]
+    except (ValueError, IndexError):
+        return None
+
+
+def verify_container(facts, run_dir, image):
+    """What differs from the sandbox the run must have."""
+    if not facts:
+        return ["the container does not exist"]
+    problems = []
+    hc = facts.get("HostConfig") or {}
+    cfg = facts.get("Config") or {}
+    if not (facts.get("State") or {}).get("Running"):
+        problems.append("container is not running")
+    if facts.get("Image") != image:
+        problems.append("container image %s is not %s" % (facts.get("Image"), image))
+    if hc.get("NetworkMode") != "none":
+        problems.append("network mode %s is not none" % hc.get("NetworkMode"))
+    nets = sorted(((facts.get("NetworkSettings") or {}).get("Networks") or {}).keys())
+    if nets not in ([], ["none"]):
+        problems.append("container is attached to networks %s" % nets)
+    if not hc.get("ReadonlyRootfs"):
+        problems.append("root filesystem is writable")
+    if "ALL" not in (hc.get("CapDrop") or []) or hc.get("CapAdd"):
+        problems.append("capabilities are not all dropped (%s / %s)"
+                        % (hc.get("CapDrop"), hc.get("CapAdd")))
+    if not any(o.startswith("no-new-privileges") for o in hc.get("SecurityOpt") or []):
+        problems.append("no-new-privileges is not set")
+    if hc.get("Privileged"):
+        problems.append("container is privileged")
+    if cfg.get("User") != "1000:1000":
+        problems.append("container user %s is not 1000:1000" % cfg.get("User"))
+    pub = os.path.realpath(os.path.join(run_dir, "public"))
+    work = os.path.realpath(os.path.join(run_dir, "work"))
+    mounts = sorted((m.get("Type"), os.path.realpath(m.get("Source") or ""),
+                     m.get("Destination"), bool(m.get("RW")))
+                    for m in facts.get("Mounts") or [])
+    want = sorted([("bind", pub, "/task/public", False), ("bind", work, "/task/work", True)])
+    if mounts != want:
+        problems.append("mounts %s are not exactly %s" % (mounts, want))
+    if set((hc.get("Tmpfs") or {}).keys()) - {"/tmp"}:
+        problems.append("unexpected tmpfs mounts %s" % hc.get("Tmpfs"))
+    if hc.get("Devices"):
+        problems.append("devices are passed in: %s" % hc.get("Devices"))
+    return problems
+
+
+def remove_container(name):
+    rc, out, err = docker("rm", "-f", name, timeout=60)
+    return rc == 0 or "No such container" in err
+
+
+# --------------------------------------------------------------------------
+# staging
+# --------------------------------------------------------------------------
+
+class StageError(Exception):
+    pass
+
+
+def read_manifest(public):
+    path = os.path.join(public, "MANIFEST.sha256")
+    entries = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError as exc:
+        raise StageError("cannot read %s: %s" % (path, exc))
+    for line in lines:
+        if not line.strip() or line.startswith("#"):
+            continue
+        m = re.match(r"^([0-9a-fA-F]{64}) [ *](.+)$", line)
+        if not m:
+            raise StageError("bad MANIFEST.sha256 line: %r" % line[:200])
+        rel = m.group(2)
+        while rel.startswith("./"):
+            rel = rel[2:]
+        entries[rel] = m.group(1).lower()
+    return entries
+
+
+def copy_verified(src, dst, want):
+    """Copy a regular file (never following a symlink) and check its sha256."""
+    st = os.lstat(src)
+    if not stat.S_ISREG(st.st_mode):
+        raise StageError("%s is not a regular file" % src)
+    fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        data = fh.read()
+    got = hashlib.sha256(data).hexdigest()
+    if got != want:
+        raise StageError("%s does not match MANIFEST.sha256 (%s != %s)" % (src, got, want))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst, "wb") as fh:
+        fh.write(data)
+    os.chmod(dst, 0o644)
+    return len(data)
+
+
+def target_questions(questions, target):
+    return [q for q in questions if isinstance(q, dict) and q.get("target") == target]
+
+
+def stage(bench, target, run_dir):
+    """Copy README.md, <target>/ and the target's questions into <run>/public.
+
+    Returns {"files": [[rel, size, sha256]], "questions": [...], "warnings": [...]}.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", target or ""):
+        raise StageError("bad target name %r" % target)
+    public = os.path.join(bench, "public")
+    tdir = os.path.join(public, target)
+    if os.path.islink(tdir) or not os.path.isdir(tdir):
+        raise StageError("%s is not a directory" % tdir)
+    manifest = read_manifest(public)
+    warnings = []
+    qpath = os.path.join(public, "questions.json")
+    if "questions.json" in manifest:
+        if sha256_file(qpath) != manifest["questions.json"]:
+            raise StageError("questions.json does not match MANIFEST.sha256")
+    else:
+        warnings.append("questions.json is not listed in MANIFEST.sha256")
+    questions = load_json(qpath)
+    if not isinstance(questions, list):
+        raise StageError("%s is not a JSON list" % qpath)
+    mine = target_questions(questions, target)
+    if not mine:
+        raise StageError("no questions have target %r" % target)
+    ids = [q.get("id") for q in mine]
+    if len(set(ids)) != len(ids) or not all(isinstance(i, str) and i for i in ids):
+        raise StageError("question ids of %s are missing or repeated: %s" % (target, ids))
+    dest = os.path.join(run_dir, "public")
+    os.makedirs(dest, exist_ok=True)
+    files = []
+    if "README.md" not in manifest:
+        raise StageError("README.md is not listed in MANIFEST.sha256")
+    wanted = ["README.md"] + sorted(r for r in manifest if r.startswith(target + "/"))
+    on_disk = set()
+    for d, dirs, names in os.walk(tdir):
+        for name in dirs + names:
+            p = os.path.join(d, name)
+            rel = os.path.relpath(p, public)
+            if os.path.islink(p):
+                raise StageError("%s is a symbolic link" % rel)
+            if os.path.isfile(p):
+                on_disk.add(rel)
+    extra = sorted(on_disk - set(wanted))
+    if extra:
+        raise StageError("files under %s/ are not in MANIFEST.sha256: %s" % (target, extra))
+    for rel in wanted:
+        if posixpath.normpath(rel) != rel or rel.startswith("/") or ".." in rel.split("/"):
+            raise StageError("bad MANIFEST path %r" % rel)
+        size = copy_verified(os.path.join(public, rel), os.path.join(dest, rel), manifest[rel])
+        files.append([rel, size, manifest[rel]])
+    qtext = json.dumps(mine, ensure_ascii=False, indent=2) + "\n"
+    with open(os.path.join(dest, "questions.json"), "w", encoding="utf-8") as fh:
+        fh.write(qtext)
+    files.append(["questions.json", len(qtext.encode("utf-8")),
+                  hashlib.sha256(qtext.encode("utf-8")).hexdigest()])
+    for q in mine:
+        rel = (q.get("impl") or {}).get("samples")
+        if q.get("impl") and not (q["impl"].get("function") and rel):
+            raise StageError("%s: impl needs function and samples" % q["id"])
+        if rel and not os.path.isfile(os.path.join(dest, rel)):
+            raise StageError("%s: samples file %s is not staged" % (q["id"], rel))
+    for root, dirs, names in os.walk(dest):
+        os.chmod(root, 0o755)
+    return {"files": files, "questions": mine, "warnings": warnings}
+
+
+def recheck_staging(run_dir, run):
+    """Compare <run>/public with what was staged and with the bench's manifest."""
+    problems = []
+    dest = os.path.join(run_dir, "public")
+    staged = {rel: sha for rel, _size, sha in run["staging"]["files"]}
+    found = set()
+    for d, dirs, names in os.walk(dest):
+        for name in dirs + names:
+            p = os.path.join(d, name)
+            rel = os.path.relpath(p, dest)
+            if os.path.islink(p):
+                problems.append("staged public has a symbolic link %s" % rel)
+            elif os.path.isfile(p):
+                found.add(rel)
+    if found != set(staged):
+        problems.append("staged public files changed: extra %s, missing %s"
+                        % (sorted(found - set(staged)), sorted(set(staged) - found)))
+    for rel in sorted(found & set(staged)):
+        if sha256_file(os.path.join(dest, rel)) != staged[rel]:
+            problems.append("staged %s changed during the run" % rel)
+    try:
+        manifest = read_manifest(os.path.join(run["bench"], "public"))
+    except StageError as exc:
+        problems.append("cannot re-read the bench manifest: %s" % exc)
+        return problems
+    for rel, sha in staged.items():
+        if rel == "questions.json":
+            continue
+        if manifest.get(rel) != sha:
+            problems.append("staged %s does not match the bench's MANIFEST.sha256" % rel)
+    return problems
+
+
+# --------------------------------------------------------------------------
+# prompt
+# --------------------------------------------------------------------------
+
+def build_prompt(target, readme, questions, files, max_calls, timeout, intro=None):
+    lines = ["You are working on one target of a JavaScript reverse-engineering benchmark. "
+             "Everything you need is in a sandbox that you reach only through the "
+             "mcp__jsre__* tools.", "",
+             "## Target %s" % target, ""]
+    if intro:
+        lines += [intro.strip(), ""]
+    else:
+        lines += ["/task/public/%s/ holds the front-end JavaScript of a website, as captured "
+                  "from its pages. The site's API requests carry values computed by this "
+                  "(obfuscated) code. The questions below are about how that code works."
+                  % target, ""]
+    lines += ["Files (read-only):"]
+    for rel, size, _sha in files:
+        lines.append("  /task/public/%s  (%d bytes)" % (rel, size))
+    lines += ["Your working directory is /task/work (read-write); nothing else is visible.", "",
+              "## Common instructions (/task/public/README.md)", "", readme.strip(), "",
+              "## Questions (%d; also in /task/public/questions.json)" % len(questions), ""]
+    for q in questions:
+        lines.append("### %s" % q["id"])
+        lines.append(str(q.get("question", "")).strip())
+        if q.get("answer_format"):
+            lines.append("Answer format: %s" % q["answer_format"])
+        impl = q.get("impl")
+        if impl:
+            lines.append("Implementation question: write /task/work/submission/%s.py defining "
+                         "`%s`; its public samples are in /task/public/%s under the key %s."
+                         % (q["id"], impl.get("function"), impl.get("samples"),
+                            json.dumps(q["id"])))
+        lines.append("")
+    lines += [
+        "## Submission",
+        "Write /task/work/submission/answers.json: one JSON object mapping each question id "
+        "to your answer. For an implementation question the value is the file name "
+        "(\"<id>.py\") of your implementation, which goes next to answers.json. Only "
+        "/task/work/submission/ is graded; your final chat reply is not. Write answers.json "
+        "early and keep it up to date as you go, and run submit_check to validate it.", "",
+        "## Tools",
+        "fs_list, fs_read, fs_grep, fs_write, fs_edit (files), node_run (Node.js 22 with the "
+        "Babel/acorn AST libraries), py_run (Python 3.13 with pycryptodome and gmssl), "
+        "js_beautify (re-indent a JS file) and submit_check. Paths are absolute container "
+        "paths under /task. There is no shell, no network, no package installation and no "
+        "debugger.", "",
+        "## Budget",
+        "%d tool calls and %d minutes of wall-clock time. When the calls are used up only "
+        "fs_write, fs_edit and submit_check keep working, for a few more calls." % (
+            max_calls, max(1, int(timeout // 60))), "",
+        "When you are done, reply with a short plain-text summary of what you submitted."]
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------
+# dsh backend
+# --------------------------------------------------------------------------
+
+def overlay_text(settings, provider_rows=""):
+    _y = backend_dsh._y
+    state = os.path.join(settings["run_dir"], "dsh")
+    args = ["--container", settings["container"], "--log", settings["log"],
+            "--max-calls", str(settings["max_calls"]), "--docker", settings.get("docker") or DOCKER]
+    if settings.get("docker_host"):
+        args += ["--docker-host", settings["docker_host"]]
+    rows = [
+        "# jsw per-run overlay; generated, do not edit",
+        "- id: %s" % MCP_ROW,
+        "  name: %s" % _y(backend_dsh.MCP_CLIENT),
+        "  config:",
+        "    serverName: %s" % _y(SERVER),
+        "    transport: stdio",
+        "    command: %s" % _y(JSRE),
+        "    args:",
+        backend_dsh._yaml_list(args, 6),
+        "    toolCallTimeoutMs: %d" % TOOL_TIMEOUT_MS,
+        "    failOnStartupError: true",
+        "    reconnect:",
+        "      enabled: false",
+        "- id: session-persistence-jsonl",
+        "  name: \"@deepseek-ai/dsh-session-persistence-jsonl\"",
+        "  config:",
+        "    root: %s" % _y(os.path.join(state, "sessions")),
+        "    compression: none",
+        "- id: storage-json",
+        "  name: \"@deepseek-ai/dsh-storage-json\"",
+        "  config:",
+        "    root: %s" % _y(os.path.join(state, "storages")),
+    ]
+    if settings.get("model") or settings.get("effort"):
+        rows += [
+            "- id: agent-default-model",
+            "  name: \"@deepseek-ai/dsh-agent-default-model\"",
+            "  config:",
+            "    provider: %s" % _y(backend_dsh.PROVIDER),
+            "    model: %s" % _y(settings.get("model") or backend_dsh.MODEL),
+            "    reasoningEffort: %s" % _y(settings.get("effort") or DEFAULT_EFFORT),
+        ]
+    if provider_rows:
+        rows.append(provider_rows.rstrip("\n"))
+    return "\n".join(rows) + "\n"
+
+
+class JsBackend(backend_dsh.DshBackend):
+    def __init__(self, dsh=None):
+        super().__init__(dsh=dsh, profile=PROFILE, repo_patch=PATCH, proxy=JSRE,
+                         server=SERVER, tool_names=TOOL_NAMES, cli="jsw", runs_dir=RUNS)
+
+    def write_overlay(self, settings, provider_rows=""):
+        path = os.path.join(settings["run_dir"], "overlay.yml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(overlay_text(settings, provider_rows))
+        return path
+
+    def composed_config_problems(self):
+        with tempfile.TemporaryDirectory(prefix="jsw-doctor-") as tmp:
+            settings = {"run_dir": tmp, "container": "jsw-doctor", "max_calls": 5,
+                        "log": os.path.join(tmp, "tools.jsonl")}
+            overlay = self.write_overlay(settings)
+            rc, out, err = self.dump_config([overlay])
+            if rc != 0:
+                return ["dump-config exit %s: %s" % (rc, err[-500:])]
+            return backend_dsh.config_problems(
+                backend_dsh.parse_dump(out), expect_log=settings["log"], proxy=JSRE,
+                server=SERVER, mcp_row=MCP_ROW, tool_rows=TOOL_ROWS)
+
+    def exposure_check(self, with_container=True):
+        """Boot the real js-worker profile against fake_llm_server.py and the real
+        jsre_mcp.py, record which tools dsh offered the model, and (with the
+        image) check that one call ran in a container and one was refused."""
+        tmp = tempfile.mkdtemp(prefix="jsw-doctor-")
+        server = None
+        name = None
+        try:
+            script = os.path.join(tmp, "script.json")
+            with open(script, "w") as fh:
+                json.dump([
+                    {"tool_calls": [{"name": "mcp__jsre__fs_list",
+                                     "arguments": {"path": "/task"}},
+                                    {"name": "mcp__jsre__fs_read",
+                                     "arguments": {"path": "/etc/passwd"}}]},
+                    {"text": "done"}], fh)
+            port_file = os.path.join(tmp, "port")
+            server = subprocess.Popen([sys.executable,
+                                       os.path.join(REWORKER, "fake_llm_server.py"),
+                                       "--script", script, "--record",
+                                       os.path.join(tmp, "llm"), "--port-file", port_file])
+            for _ in range(100):
+                if os.path.exists(port_file):
+                    break
+                time.sleep(0.05)
+            with open(port_file) as fh:
+                port = int(fh.read())
+            for sub in ("public", "work", "dsh-cwd"):
+                os.makedirs(os.path.join(tmp, sub))
+            with open(os.path.join(tmp, "public", "README.md"), "w") as fh:
+                fh.write("doctor\n")
+            run_id = "doctor-%s" % secrets.token_hex(3)
+            name = container_name(run_id)
+            if with_container:
+                name, cproblems = start_container(run_id, tmp, expected_image())
+                if cproblems:
+                    return {"ok": False, "problems": cproblems}
+            settings = {"run_dir": tmp, "cwd": os.path.join(tmp, "dsh-cwd"),
+                        "container": name, "max_calls": 5, "docker_host": docker_host(),
+                        "log": os.path.join(tmp, "tools.jsonl")}
+            self.write_overlay(settings, backend_dsh.fake_provider_rows(port))
+            env = dict(os.environ, REW_FAKE_LLM_KEY="fake")
+            outcome = self.run("doctor exposure check", settings, 180, env=env)
+            req = os.path.join(tmp, "llm", "request-000.json")
+            offered, system = [], ""
+            if os.path.exists(req):
+                with open(req) as fh:
+                    body = json.load(fh)
+                offered = sorted(t.get("function", {}).get("name")
+                                 for t in body.get("tools") or [])
+                system = json.dumps(body.get("messages") or [], ensure_ascii=False)
+            problems = []
+            if offered != TOOL_NAMES:
+                problems.append("dsh offered the model %s" % offered)
+            for leak in ("AGENTS.md", "CLAUDE.md", "SKILL.md"):
+                if leak in system:
+                    problems.append("the first request mentions %s; workspace instructions "
+                                    "or skills reach the prompt" % leak)
+            if with_container:
+                log = [json.loads(l) for l in open(settings["log"])
+                       if l.strip()] if os.path.exists(settings["log"]) else []
+                calls = [(r.get("tool"), bool(r.get("refused")), bool(r.get("is_error")))
+                         for r in log if r.get("event") == "call"]
+                if sorted(calls) != [("fs_list", False, False), ("fs_read", True, True)]:
+                    problems.append("jsre calls %s, expected fs_list to run and fs_read "
+                                    "/etc/passwd to be refused" % calls)
+            if outcome["exit"] != 0:
+                problems.append("dsh exit %s: %s" % (outcome["exit"], outcome["stderr"][-300:]))
+            return {"ok": not problems, "offered": offered, "problems": problems}
+        except Exception as exc:
+            return {"ok": False, "problems": ["%s: %s" % (type(exc).__name__, exc)]}
+        finally:
+            if server is not None:
+                server.terminate()
+                server.wait(5)
+            if name and with_container:
+                remove_container(name)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def doctor(self):
+        checks = []
+
+        def add(name, ok, detail):
+            checks.append({"check": name, "ok": bool(ok), "detail": detail})
+
+        version, err = self.version()
+        add("dsh", version is not None, version or err or "not found: %s" % self.dsh)
+        problems = self.problems()
+        add("profile", not problems, problems or backend_dsh.profile_dir(PROFILE))
+        config_ok = False
+        if os.path.isdir(backend_dsh.profile_dir(PROFILE)):
+            cp = self.composed_config_problems()
+            config_ok = not cp
+            add("composed config", config_ok, cp or "%d rows disabled; %s -> %s"
+                % (len(TOOL_ROWS), MCP_ROW, JSRE))
+        rc, out, err = docker("version", "--format", "{{.Server.Version}}")
+        add("docker", rc == 0, out.strip() if rc == 0 else (err or out).strip()[-300:])
+        ip = image_problems() if rc == 0 else ["docker is not available"]
+        add("image", not ip, ip or "%s = %s" % (IMAGE_TAG, expected_image()))
+        if config_ok:
+            exp = self.exposure_check(with_container=not ip)
+            add("tools offered to the model", exp["ok"], exp["problems"] or exp.get("offered"))
+        return checks
+
+
+# --------------------------------------------------------------------------
+# finishing a run: export, audit, summary
+# --------------------------------------------------------------------------
+
+def export_submission(run_dir):
+    """Copy work/submission/ to <run>/submission/: regular files only, never
+    following a symlink, so a link the worker made cannot pull host files in."""
+    src = os.path.join(run_dir, "work", "submission")
+    dst = os.path.join(run_dir, "submission")
+    if os.path.lexists(dst):
+        shutil.rmtree(dst)
+    os.makedirs(dst)
+    report = {"dir": dst, "files": [], "skipped": []}
+    if os.path.islink(src):
+        report["skipped"].append({"name": "submission", "why": "work/submission is a "
+                                  "symbolic link to %s" % os.readlink(src)})
+        return report
+    if not os.path.isdir(src):
+        report["skipped"].append({"name": "submission", "why": "work/submission does not exist"})
+        return report
+    for name in sorted(os.listdir(src)):
+        p = os.path.join(src, name)
+        st = os.lstat(p)
+        if stat.S_ISLNK(st.st_mode):
+            report["skipped"].append({"name": name, "why": "symbolic link to %s"
+                                      % os.readlink(p)})
+        elif not stat.S_ISREG(st.st_mode):
+            report["skipped"].append({"name": name, "why": "not a regular file"})
+        elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", name):
+            report["skipped"].append({"name": name, "why": "unexpected file name"})
+        elif st.st_size > MAX_SUBMISSION_FILE:
+            report["skipped"].append({"name": name, "why": "larger than %d bytes"
+                                      % MAX_SUBMISSION_FILE})
+        else:
+            fd = os.open(p, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as fh:
+                data = fh.read(MAX_SUBMISSION_FILE + 1)
+            with open(os.path.join(dst, name), "wb") as fh:
+                fh.write(data)
+            report["files"].append(name)
+    return report
+
+
+def scan_symlinks(work):
+    """Symbolic links under work/, with where they point inside the container."""
+    found = []
+    for d, dirs, names in os.walk(work, followlinks=False):
+        for name in dirs + names:
+            p = os.path.join(d, name)
+            if not os.path.islink(p):
+                continue
+            target = os.readlink(p)
+            cpath = "/task/work/" + os.path.relpath(p, work)
+            resolved = posixpath.normpath(target if target.startswith("/") else
+                                          posixpath.join(posixpath.dirname(cpath), target))
+            found.append({"path": cpath, "target": target,
+                          "inside": resolved == "/task" or resolved.startswith("/task/")})
+            if len(found) >= 100:
+                return found
+    return found
+
+
+def host_fragments(run_dir, bench):
+    frags = {os.path.realpath(run_dir), os.path.realpath(bench), os.path.realpath(RUNS),
+             os.path.realpath(RE_DIR), os.path.realpath(HERE), os.path.expanduser("~"),
+             run_dir, bench}
+    return sorted((f for f in frags if f and len(f) > 6), key=len, reverse=True)
+
+
+SEALED_RE = re.compile(r"(?i)\bsealed\b")
+PATH_KEYS = {"fs_list": ["path"], "fs_read": ["path"], "fs_grep": ["path"],
+             "fs_write": ["path"], "fs_edit": ["path"], "node_run": ["file"],
+             "py_run": ["file"], "js_beautify": ["path", "out"]}
+WRITE_KEYS = {("fs_write", "path"), ("fs_edit", "path"), ("js_beautify", "out")}
+
+
+def audit(outcomes, log, run, symlinks, staging_problems, container_problems, export):
+    """Breaches: things that are impossible by construction. Flags: worker
+    behaviour worth a look (attempts that were refused, host paths, 'sealed').
+    Notes: everything else worth knowing."""
+    breaches, flags, notes = [], [], []
+    names = set(TOOL_NAMES)
+    completed = 0
+    for i, o in enumerate(outcomes, 1):
+        for c in o["calls"]:
+            tool = c.get("tool")
+            if tool in names:
+                if c.get("status") == "completed":
+                    completed += 1
+                continue
+            err = c.get("error") or {}
+            if c.get("status") == "error" and err.get("code") == "UNKNOWN_TOOL":
+                notes.append("attempt %d: the model asked for %r, which is not registered; "
+                             "dsh rejected the call" % (i, tool))
+            else:
+                breaches.append("attempt %d: the event stream shows a call to %r (status %s);"
+                                " only the jsre tools should exist" % (i, tool, c.get("status")))
+    calls = [r for r in log if r.get("event") == "call"]
+    ran = [r for r in calls if r.get("allowed") and not r.get("refused")]
+    if completed > len(ran):
+        breaches.append("%d jsre tool results in the event stream, but only %d calls ran in "
+                        "jsre_mcp.py" % (completed, len(ran)))
+    for r in log:
+        if r.get("event") == "start":
+            if r.get("max_calls") != run["max_calls"] or r.get("container") != run["container"]:
+                breaches.append("jsre_mcp.py ran with container %s / max %s instead of %s / %s"
+                                % (r.get("container"), r.get("max_calls"), run["container"],
+                                   run["max_calls"]))
+        elif r.get("event") == "fatal":
+            notes.append("jsre_mcp.py stopped (fail closed): %s" % r.get("reason"))
+    over = 0
+    frags = host_fragments(run["run_dir"], run["bench"])
+    arg_text = ""
+    for r in calls:
+        tool, args = r.get("tool"), r.get("arguments")
+        n = r.get("call_no")
+        label = "call %s %s" % (n if n is not None else "-", tool)
+        args_json = json.dumps(args, ensure_ascii=False)
+        arg_text += args_json
+        if r.get("over_budget"):
+            over += 1
+            if tool not in jsre_mcp.SUBMIT_TOOLS and r.get("allowed"):
+                breaches.append("%s ran after the call budget" % label)
+        if n is not None and n > run["max_calls"] and not r.get("over_budget"):
+            breaches.append("%s ran past the budget of %d" % (label, run["max_calls"]))
+        if r.get("refused") and r.get("reason") and ("outside" in r["reason"]):
+            flags.append("%s refused: %s" % (label, r["reason"][:300]))
+        if r.get("allowed") and not r.get("refused") and isinstance(args, dict):
+            for key in PATH_KEYS.get(tool, []):
+                if isinstance(args.get(key), str):
+                    try:
+                        jsre_mcp.check_path(args[key], key, write=(tool, key) in WRITE_KEYS)
+                    except jsre_mcp.Refusal as exc:
+                        breaches.append("%s ran with %s outside the sandbox: %s"
+                                        % (label, key, exc))
+        for f in frags:
+            if f in args_json:
+                flags.append("%s arguments contain the host path %s" % (label, f))
+                break
+        if SEALED_RE.search(args_json):
+            flags.append("%s arguments mention 'sealed'" % label)
+    if over > jsre_mcp.GRACE_CALLS:
+        breaches.append("%d calls ran after the budget; at most %d may"
+                        % (over, jsre_mcp.GRACE_CALLS))
+    for r in calls:
+        res = r.get("result") or ""
+        for f in frags:
+            if f in res:
+                where = "the worker had typed it" if f in arg_text else "it came from the sandbox"
+                (flags if f in arg_text else breaches).append(
+                    "call %s %s result contains the host path %s (%s)"
+                    % (r.get("call_no"), r.get("tool"), f, where))
+                break
+    for s in symlinks:
+        if not s["inside"]:
+            flags.append("symbolic link %s -> %s points outside /task" % (s["path"], s["target"]))
+    for s in export["skipped"]:
+        notes.append("submission file %s not exported: %s" % (s["name"], s["why"]))
+    breaches += ["staging: " + p for p in staging_problems]
+    breaches += ["container: " + p for p in container_problems]
+    return {"ok": not breaches, "breaches": breaches, "flags": flags, "notes": notes}
+
+
+def read_log(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    out.append(rec)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def load_outcomes(run_dir, attempts):
+    outcomes = []
+    for a in attempts:
+        path = os.path.join(run_dir, "events-%s.jsonl" % a["tag"])
+        try:
+            with open(path, "rb") as fh:
+                lines = fh.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            lines = []
+        outcomes.append(backend_dsh.parse_events(lines))
+    return outcomes
+
+
+def finalize(run_dir, run, attempts):
+    """Export, audit, remove the container and write summary.json."""
+    name = run["container"]
+    check = None
+    facts = inspect_container(name)
+    if facts and (facts.get("State") or {}).get("Running"):
+        try:
+            c = jsre_mcp.Container(name, DOCKER, run.get("docker_host"))
+            rep = jsre_mcp.submit_check(c)
+            check = {k: rep[k] for k in ("errors", "warnings", "passed", "failed", "missing",
+                                         "answered", "text")}
+        except Exception as exc:
+            check = {"error": "%s: %s" % (type(exc).__name__, exc)}
+    container_problems = [p for p in verify_container(facts, run_dir, run["image"])
+                          if p != "container is not running"] if facts else []
+    remove_container(name)
+    export = export_submission(run_dir)
+    log = read_log(run["log"])
+    outcomes = load_outcomes(run_dir, attempts)
+    symlinks = scan_symlinks(os.path.join(run_dir, "work"))
+    report = audit(outcomes, log, run, symlinks, recheck_staging(run_dir, run),
+                   container_problems, export)
+    if not facts:
+        report["notes"].append("the container was gone before the run ended")
+    tokens = {}
+    for o in outcomes:
+        for k, v in o["usage"].items():
+            tokens[k] = tokens.get(k, 0) + v
+    if any(o["steps_without_usage"] for o in outcomes):
+        tokens["incomplete"] = True
+    calls = [r for r in log if r.get("event") == "call"]
+    by_tool = {}
+    for r in calls:
+        by_tool[r.get("tool")] = by_tool.get(r.get("tool"), 0) + 1
+    numbered = [r["call_no"] for r in calls if isinstance(r.get("call_no"), int)]
+    last = attempts[-1] if attempts else {}
+    if last.get("timed_out"):
+        status = "timed_out"
+    elif last.get("final") is not None and (last.get("reason") or {}).get("kind") == "completed":
+        status = "finished"
+    else:
+        status = "failed"
+    answers = load_json(os.path.join(export["dir"], "answers.json"))
+    qids = [q["id"] for q in run["staging"]["questions"]]
+    answered = sorted(k for k in (answers or {}) if k in qids) \
+        if isinstance(answers, dict) else []
+    summary = {
+        "run_id": run["run_id"], "target": run["target"], "status": status,
+        "model": run["model"], "effort": run["effort"], "timeout": run["timeout"],
+        "max_calls": run["max_calls"], "bench": run["bench"], "image": run["image"],
+        "container": name, "session": next((a.get("session") for a in attempts
+                                            if a.get("session")), None),
+        "seconds": round(sum(a.get("seconds") or 0 for a in attempts), 1),
+        "attempts": attempts, "tokens": tokens,
+        "tool_calls": {"total": len(calls), "by_tool": by_tool,
+                       "refused": sum(1 for r in calls if r.get("refused")),
+                       "budget_used": min(max(numbered or [0]), run["max_calls"]),
+                       "over_budget": sum(1 for r in calls if r.get("over_budget"))},
+        "submission": dict(export, answered=answered,
+                           missing=[q for q in qids if q not in answered]),
+        "submit_check": check,
+        "audit": report,
+        "final_text": (last.get("final") or "")[-2000:],
+        "run_dir": run_dir,
+    }
+    save_json(os.path.join(run_dir, "summary.json"), summary)
+    return summary
+
+
+def exit_code(summary):
+    if not summary["audit"]["ok"]:
+        return 3
+    return 0 if summary["status"] == "finished" else 1
+
+
+def attempt_record(tag, outcome):
+    return {"tag": tag, "session": outcome["session"], "exit": outcome["exit"],
+            "timed_out": outcome["timed_out"], "seconds": outcome["seconds"],
+            "reason": outcome["reason"], "final": outcome["final"], "steps": outcome["steps"],
+            "tool_calls": len(outcome["calls"]), "usage": outcome["usage"],
+            "errors": outcome["errors"][-5:], "stderr": outcome["stderr"][-1000:]}
+
+
+# --------------------------------------------------------------------------
+# commands
+# --------------------------------------------------------------------------
+
+def blocked(problems):
+    emit({"status": "blocked", "problems": problems})
+    return 2
+
+
+def readiness(backend):
+    return backend.problems() + image_problems()
+
+
+def find_run(run_id):
+    path = run_id if os.path.isdir(run_id) else os.path.join(RUNS, run_id)
+    if not os.path.isfile(os.path.join(path, "run.json")):
+        raise SystemExit("jsw: no run %s (looked in %s)" % (run_id, path))
+    return os.path.realpath(path)
+
+
+def write_pid(run_dir):
+    with open(os.path.join(run_dir, "jsw.pid"), "w") as fh:
+        fh.write(str(os.getpid()))
+
+
+def clear_pid(run_dir):
+    try:
+        os.unlink(os.path.join(run_dir, "jsw.pid"))
+    except OSError:
+        pass
+
+
+def execute(backend, run_dir, run, attempts, prompt, timeout, session=None):
+    tag = str(len(attempts) + 1)
+    with open(os.path.join(run_dir, "prompt-%s.txt" % tag if attempts else "prompt.txt"),
+              "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+    settings = {"run_dir": run_dir, "cwd": os.path.join(run_dir, "dsh-cwd"),
+                "container": run["container"], "log": run["log"],
+                "max_calls": run["max_calls"], "model": run.get("model_arg"),
+                "effort": run.get("effort_arg"), "docker_host": run.get("docker_host")}
+    backend.write_overlay(settings)
+    outcome = backend.run(prompt, settings, timeout, session=session, tag=tag)
+    attempts.append(attempt_record(tag, outcome))
+    save_json(os.path.join(run_dir, "attempts.json"), attempts)
+    return outcome
+
+
+def cmd_run(args):
+    backend = JsBackend()
+    problems = readiness(backend)
+    if problems:
+        sys.stderr.write("jsw: not ready; run `jsw setup` / image/build.sh, then `jsw doctor`\n")
+        return blocked(problems)
+    bench = os.path.realpath(args.bench)
+    run_id = "%s-%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), args.target, secrets.token_hex(2))
+    os.makedirs(RUNS, exist_ok=True)
+    run_dir = os.path.join(os.path.realpath(RUNS), run_id)
+    os.makedirs(os.path.join(run_dir, "work", "submission"))
+    os.makedirs(os.path.join(run_dir, "dsh-cwd"))
+    # the container user (uid 1000) writes here
+    os.chmod(os.path.join(run_dir, "work"), 0o777)
+    os.chmod(os.path.join(run_dir, "work", "submission"), 0o777)
+    try:
+        staging = stage(bench, args.target, run_dir)
+    except (StageError, OSError) as exc:
+        return blocked(["staging failed: %s" % exc, "run dir: %s" % run_dir])
+    image = expected_image()
+    run = {"run_id": run_id, "target": args.target, "bench": bench, "run_dir": run_dir,
+           "model": args.model or backend_dsh.MODEL, "effort": args.effort or DEFAULT_EFFORT,
+           "model_arg": args.model, "effort_arg": args.effort, "timeout": args.timeout,
+           "max_calls": args.max_calls, "image": image, "container": container_name(run_id),
+           "log": os.path.join(run_dir, "tools.jsonl"), "docker_host": docker_host(),
+           "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "staging": staging}
+    save_json(os.path.join(run_dir, "run.json"), run)
+    readme = open(os.path.join(run_dir, "public", "README.md"), encoding="utf-8").read()
+    intro_path = os.path.join(run_dir, "public", args.target, "README.md")
+    intro = open(intro_path, encoding="utf-8").read() if os.path.isfile(intro_path) else None
+    prompt = build_prompt(args.target, readme, staging["questions"], staging["files"],
+                          args.max_calls, args.timeout, intro)
+    write_pid(run_dir)
+    try:
+        name, cproblems = start_container(run_id, run_dir, image)
+        if cproblems:
+            remove_container(name)
+            return blocked(cproblems + ["run dir: %s" % run_dir])
+        attempts = []
+        execute(backend, run_dir, run, attempts, prompt, args.timeout)
+        summary = finalize(run_dir, run, attempts)
+    finally:
+        clear_pid(run_dir)
+    emit(summary)
+    if not summary["audit"]["ok"]:
+        sys.stderr.write("jsw: AUDIT FAILED - %s\n" % "; ".join(summary["audit"]["breaches"]))
+    return exit_code(summary)
+
+
+def cmd_resume(args):
+    run_dir = find_run(args.run_id)
+    run = load_json(os.path.join(run_dir, "run.json"))
+    attempts = load_json(os.path.join(run_dir, "attempts.json"), [])
+    session = next((a.get("session") for a in attempts if a.get("session")), None)
+    if not session:
+        return blocked(["run %s has no dsh session to resume" % run["run_id"]])
+    backend = JsBackend()
+    problems = readiness(backend)
+    if problems:
+        return blocked(problems)
+    if expected_image() != run["image"]:
+        return blocked(["the image changed since the run started (%s -> %s)"
+                        % (run["image"], expected_image())])
+    if os.path.exists(os.path.join(run_dir, "jsw.pid")):
+        try:
+            pid = int(open(os.path.join(run_dir, "jsw.pid")).read())
+            os.kill(pid, 0)
+            return blocked(["run %s is still active (jsw pid %d)" % (run["run_id"], pid)])
+        except (ValueError, OSError):
+            pass
+    write_pid(run_dir)
+    try:
+        facts = inspect_container(run["container"])
+        if facts:
+            remove_container(run["container"])
+        name, cproblems = start_container(run["run_id"], run_dir, run["image"])
+        if cproblems:
+            remove_container(name)
+            return blocked(cproblems)
+        timeout = args.timeout if args.timeout is not None else run["timeout"]
+        execute(backend, run_dir, run, attempts, args.prompt or RESUME_PROMPT, timeout,
+                session=session)
+        summary = finalize(run_dir, run, attempts)
+    finally:
+        clear_pid(run_dir)
+    emit(summary)
+    return exit_code(summary)
+
+
+def cmd_merge(args):
+    out = os.path.abspath(args.o)
+    if os.path.exists(out) and os.listdir(out) and not args.force:
+        return blocked(["%s exists and is not empty (use --force to add to it)" % out])
+    merged, sources, files, problems = {}, {}, {}, []
+    for rid in args.run_ids:
+        run_dir = find_run(rid)
+        run = load_json(os.path.join(run_dir, "run.json"))
+        summary = load_json(os.path.join(run_dir, "summary.json"))
+        if not summary:
+            problems.append("%s has no summary.json (did it finish?)" % rid)
+            continue
+        if not summary["audit"]["ok"] and not args.force:
+            problems.append("%s failed its audit; use --force to merge it anyway" % rid)
+            continue
+        sub = os.path.join(run_dir, "submission")
+        questions = {q["id"]: q for q in run["staging"]["questions"]}
+        apath = os.path.join(sub, "answers.json")
+        answers = load_json(apath) if os.path.isfile(apath) and not os.path.islink(apath) \
+            else None
+        if not isinstance(answers, dict):
+            problems.append("%s: submission/answers.json is missing or not a JSON object" % rid)
+            answers = {}
+        for qid, val in answers.items():
+            if qid not in questions:
+                problems.append("%s: %s is not a question of target %s"
+                                % (rid, qid, run["target"]))
+                continue
+            if qid in merged:
+                problems.append("%s answered by both %s and %s" % (qid, sources[qid], rid))
+                continue
+            merged[qid] = val
+            sources[qid] = rid
+        for qid, q in questions.items():
+            if not q.get("impl"):
+                continue
+            val = answers.get(qid)
+            fname = val if isinstance(val, str) and re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]*\.py", val) else qid + ".py"
+            p = os.path.join(sub, fname)
+            if os.path.isfile(p) and not os.path.islink(p):
+                if fname in files:
+                    problems.append("%s comes from both %s and %s" % (fname, files[fname][0], rid))
+                else:
+                    files[fname] = (rid, p)
+    if problems:
+        return blocked(problems)
+    os.makedirs(out, exist_ok=True)
+    existing = load_json(os.path.join(out, "answers.json"), {}) if args.force else {}
+    clash = sorted(set(existing) & set(merged))
+    if clash:
+        return blocked(["%s already has answers for %s" % (out, clash)])
+    existing.update(merged)
+    save_json(os.path.join(out, "answers.json"), dict(sorted(existing.items())))
+    for fname, (rid, p) in sorted(files.items()):
+        shutil.copyfile(p, os.path.join(out, fname))
+    emit({"ok": True, "out": out, "answers": len(merged), "files": sorted(files),
+          "from": {rid: sorted(q for q, r in sources.items() if r == rid)
+                   for rid in args.run_ids}})
+    return 0
+
+
+def cmd_gc(args):
+    rc, out, err = docker("ps", "-a", "--filter", "label=jsw.run", "--format",
+                          '{{.Names}}\t{{.Label "jsw.pid"}}\t{{.State}}')
+    if rc != 0:
+        return blocked(["docker ps failed: %s" % (err or out).strip()[-300:]])
+    removed, kept = [], []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        name, pid, state = parts[0], parts[1], parts[2]
+        alive = False
+        try:
+            os.kill(int(pid), 0)
+            alive = True
+        except (ValueError, OSError):
+            pass
+        if alive:
+            kept.append({"container": name, "why": "jsw pid %s is still running" % pid})
+            continue
+        if not args.dry_run:
+            remove_container(name)
+        removed.append({"container": name, "state": state})
+    emit({"ok": True, "dry_run": args.dry_run, "removed": removed, "kept": kept})
+    return 0
+
+
+def cmd_setup(args):
+    res = JsBackend().setup()
+    emit(res)
+    return 0 if res["ok"] else 1
+
+
+def cmd_doctor(args):
+    checks = JsBackend().doctor()
+    ok = all(c["ok"] for c in checks)
+    emit({"ok": ok, "checks": checks})
+    return 0 if ok else 1
+
+
+def parser():
+    ap = argparse.ArgumentParser(prog="jsw", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("setup", help="create or refresh the js-worker dsh profile")
+    sub.add_parser("doctor", help="check the installation and what the model is offered")
+    run = sub.add_parser("run", help="run one target")
+    run.add_argument("--target", required=True, help="target directory, e.g. t3")
+    run.add_argument("--model", help="model id (default %s)" % backend_dsh.MODEL)
+    run.add_argument("--effort", choices=backend_dsh.EFFORTS,
+                     help="reasoning effort (default %s)" % DEFAULT_EFFORT)
+    run.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
+                     help="wall-clock seconds (default %(default)s)")
+    run.add_argument("--max-calls", type=int, default=DEFAULT_MAX_CALLS,
+                     help="tool-call budget (default %(default)s)")
+    run.add_argument("--bench", default=BENCH, help="benchmark dir (default %(default)s)")
+    res = sub.add_parser("resume", help="continue a run's dsh session")
+    res.add_argument("run_id")
+    res.add_argument("--prompt", help="message for the worker (default: continue)")
+    res.add_argument("--timeout", type=float, help="seconds (default: the run's --timeout)")
+    mrg = sub.add_parser("merge", help="merge runs' exported submissions into one directory")
+    mrg.add_argument("run_ids", nargs="+")
+    mrg.add_argument("-o", required=True, help="output directory")
+    mrg.add_argument("--force", action="store_true",
+                     help="merge runs whose audit failed / add to a non-empty directory")
+    gc = sub.add_parser("gc", help="remove containers of runs that are no longer active")
+    gc.add_argument("--dry-run", action="store_true")
+    return ap
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    if not args.cmd:
+        parser().print_help()
+        return 2
+    if args.cmd == "run" and args.max_calls < 1:
+        return blocked(["--max-calls must be at least 1"])
+    return {"setup": cmd_setup, "doctor": cmd_doctor, "run": cmd_run, "resume": cmd_resume,
+            "merge": cmd_merge, "gc": cmd_gc}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

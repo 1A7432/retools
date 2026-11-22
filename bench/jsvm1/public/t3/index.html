@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>潮汐票务 - 下单</title></head>
+<body>
+<form id="f"><input id="show" placeholder="场次编号"><input id="qty" type="number" value="1"><button>提交订单</button></form>
+<pre id="out"></pre>
+<script src="app.js"></script>
+<script>
+document.getElementById('f').addEventListener('submit', function (e) {
+  e.preventDefault();
+  TW.request('/api/v2/order', { show: document.getElementById('show').value, qty: document.getElementById('qty').value })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { document.getElementById('out').textContent = JSON.stringify(j, null, 2); });
+});
+</script>
+</body>
+</html>

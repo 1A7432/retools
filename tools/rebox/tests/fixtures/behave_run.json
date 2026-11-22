@@ -1,0 +1,83 @@
+{
+ "sample": "/FIXTURE/behave.exe",
+ "sandbox": {
+  "tcp_connect": "denied",
+  "dns": "denied",
+  "write_outside": "denied",
+  "write_inside": "ok",
+  "verified": true
+ },
+ "identity": {
+  "arch": "x86",
+  "pe_type": "exe",
+  "subsystem": "console",
+  "timestamp": 1600000000,
+  "image_base": "0x400000",
+  "entry_rva": "0x1000",
+  "imports": 20,
+  "sections": [
+   {
+    "name": ".text",
+    "rva": "0x1000",
+    "vsize": "0x1af",
+    "rawsize": "0x200",
+    "perms": "r-x",
+    "entropy": 3.07
+   },
+   {
+    "name": ".data",
+    "rva": "0x2000",
+    "vsize": "0x30d",
+    "rawsize": "0x400",
+    "perms": "rw-",
+    "entropy": 2.56
+   },
+   {
+    "name": ".idata",
+    "rva": "0x3000",
+    "vsize": "0x27b",
+    "rawsize": "0x400",
+    "perms": "rw-",
+    "entropy": 2.87
+   }
+  ],
+  "imphash": "07db20889804c6896a224ee012b88906"
+ },
+ "errors": [],
+ "dumps": [
+  {
+   "kind": "dyncode",
+   "path": "/FIXTURE/out/dumps/dyncode_0x50000_8cdba47e8042.bin",
+   "size": 4096,
+   "sha256": "8cdba47e8042d2d0568cc54017b2bb27bac2d4145c9d2d244d0bbae1a1b7e741",
+   "base": "0x50000",
+   "tag": "api.VirtualAlloc.0x50000",
+   "when": "first_exec",
+   "executed": true
+  },
+  {
+   "kind": "dropped",
+   "path": "/FIXTURE/out/dumps/dropped_rebox_drop.txt_662cc73584cd.bin",
+   "size": 20,
+   "sha256": "662cc73584cda3335c71ed60378073f4a575e61b88056ee394ada9f4e39b796d",
+   "name": "rebox_drop.txt",
+   "emu_path": "C:\\Users\\Public\\rebox_drop.txt"
+  }
+ ],
+ "dumps_skipped": [],
+ "speakeasy_version": "2.0.0b9",
+ "unicorn_version": "2.1.4",
+ "command_line": "C:\\Windows\\system32\\behave.exe",
+ "run_api_calls": [
+  21
+ ],
+ "inner_wall_time": 0.48,
+ "rebox": {
+  "sha256": "e99080e3d503247addc223090e881458e698a6001486330dfd54446f03de23d2",
+  "size": 3584,
+  "sample_name": "behave.exe",
+  "wall_time": 0.6019017079961486,
+  "timeout": 60,
+  "sandbox_state": "sandbox-exec: no network, writes only to out_dir"
+ }
+}

@@ -1,0 +1,25 @@
+# Local data: run records, exported images, the findings ledger, private notes
+/tmp/
+/findings/
+/local/
+
+# Benchmark answers and scratch work stay local so the question sets remain blind
+/bench/*/sealed/
+/bench/*/work/
+# Setter-side notes: they list what each target tests and where the traps are
+/bench/*/DESIGN.md
+
+# Real endpoint configuration for the worker profiles
+/tools/reworker/profile/provider.local.yml
+
+# Environments and fetched third-party files (rebuilt by uv / setup commands)
+.venv/
+.venv-elf/
+/tools/rebox/elf-rootfs/
+/tools/jsworker/image/cache/
+node_modules/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

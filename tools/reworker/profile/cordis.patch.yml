@@ -1,0 +1,100 @@
+# Patch layer for the dsh profile `re-worker` (bundles: dsh-base + dsh-headless).
+# This file is a template. `rew setup` renders it (provider rows from
+# reworker/profile/provider.local.yml, or provider.example.yml when that is absent,
+# and the @...@ paths) into ~/.dsh/profiles/re-worker/cordis.patch.yml; edit it here,
+# not there.
+#
+# The worker model may only use the ida tools, reached through guardproxy.py.
+# Every other model-facing tool row is disabled below; `rew doctor` checks the
+# composed config so a dsh update that adds or renames a row is noticed.
+
+# @PROVIDER_ROWS@
+
+# Workers take many small steps, so the default effort is high rather than the
+# desktop's max. `rew run --effort` overrides it per run.
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: "@PROVIDER@"
+    model: "@MODEL@"
+    reasoningEffort: high
+
+# The headless bundle disables the stored-credential store; the key lives there.
+- id: credentials
+  disabled: false
+- id: authorization
+  disabled: false
+
+# The headless bundle calls the agent a coding agent; the task prompt says the rest.
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      You are a read-only reverse-engineering worker powered by the {{model}} model.
+
+# A session title costs an extra model call per run and nobody reads it.
+- id: session-title-llm
+  disabled: true
+
+# Model-facing tools other than the ida MCP tools.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-agent-team
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+
+# The ida MCP server, reached only through the guard proxy. `rew run` replaces
+# this row's config per run (mode, call budget, log path) with a --patch overlay;
+# these values apply only when the profile is booted without rew.
+- insert:
+    - id: mcp-ida
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: ida
+        transport: stdio
+        command: "@PROXY@"
+        args:
+          - --mode
+          - strict
+          - --max-calls
+          - "25"
+          - --log
+          - "@ROOT@/tmp/rew-runs/direct-guard.jsonl"
+          - --
+          - ida-mcp
+          - stdio
+          - --agent=dsh-worker
+        toolCallTimeoutMs: 180000
+        failOnStartupError: true
+        reconnect:
+          enabled: false

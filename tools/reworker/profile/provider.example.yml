@@ -1,0 +1,31 @@
+# Provider rows for the worker profiles. Copy to provider.local.yml (not tracked
+# by git) and point it at your own OpenAI-compatible endpoint; `rew setup` and
+# `jsw setup` then install it. The two comment lines below name the provider key
+# and the model id the workers use by default.
+# default-provider: deepseek
+# default-model: deepseek-v4.1-flash
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      deepseek:
+        displayName: DeepSeek
+        apiKeyEnv: DEEPSEEK_API_KEY
+        api: openai-completions
+        baseURL: https://api.deepseek.com/v1
+        compat:
+          thinkingFormat: deepseek
+          supportsReasoningEffort: true
+        defaultInput:
+          - text
+        models:
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 65536
+            input:
+              - text
+            reasoningEfforts:
+              low: low
+              high: high
+              max: max

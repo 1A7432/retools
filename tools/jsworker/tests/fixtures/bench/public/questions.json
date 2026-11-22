@@ -1,0 +1,5 @@
+[
+  {"id": "T1-01", "target": "t1", "question": "Implement the function exported as sign by /task/public/t1/app.js.", "answer_format": "Python file defining sign(s: str) -> str", "difficulty": 1, "impl": {"function": "sign", "samples": "t1/samples.json"}},
+  {"id": "T1-02", "target": "t1", "question": "What multiplier does sign use per character?", "answer_format": "integer", "difficulty": 1},
+  {"id": "T2-01", "target": "t2", "question": "What does k() in /task/public/t2/app.js return?", "answer_format": "integer", "difficulty": 1}
+]

@@ -1,0 +1,8 @@
+# Installed with: pip install --no-deps --require-hashes -r requirements.txt
+# These two packages are the only third-party Python libraries a jsvm1 submission may use.
+pycryptodome==4.5.0 \
+    --hash=sha256:04c1b9feaf73db4f6aae714589bdabdf2c3d991b579976e1f734de6de133a099 \
+    --hash=sha256:3afbe7ecd62357203a588d451c604a61af7d7c9d3f0aa0b792de0612cffb8f8d \
+    --hash=sha256:51e97a8d1cf101974bc40c20b3191cb1903891e5c172346943d5d4f3bc4f9d83
+gmssl==3.2.2 \
+    --hash=sha256:59f069a91eb19ef59b9e7be4d436ed01c92ce064d3d7d45a8778fc07fd2cd068

@@ -1,0 +1,430 @@
+#!/usr/bin/env python3
+"""rew: run one read-only IDA worker on a cheap model and return one JSON object.
+
+    rew run --db PATH (--task FILE | --goal TEXT [--target EA]... [--question TEXT]...)
+            [--context TEXT] [--mode strict|free] [--max-calls N]
+            [--effort low|high|max] [--model ID] [--timeout SECONDS] [--out FILE]
+    rew --db PATH ...            same as `rew run`
+    rew setup                    create or refresh the dsh profile `re-worker`
+    rew doctor                   check dsh, the profile, the proxy and ida-mcp
+    rew verify --db PATH --id ID (--ok | --reject) [--note TEXT]
+    rew note --db PATH --claim TEXT --evidence EA... [--confidence high|medium|low]
+
+`rew run` prints exactly one JSON object: the validated result plus a `worker`
+object. Exit 0 means a valid result; 1 an invalid one; 2 that the worker could
+not start; 3 that the post-run audit found a tool call that should have been
+impossible.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import secrets
+import sys
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+
+import contract  # noqa: E402
+import guard  # noqa: E402
+import ledger  # noqa: E402
+import refs  # noqa: E402
+from backend_dsh import DshBackend, IDA_TOOL_NAMES, MODEL, EFFORT, EFFORTS  # noqa: E402
+
+RUNS = os.environ.get("REW_RUNS") or os.path.normpath(
+    os.path.join(HERE, "..", "..", "tmp", "rew-runs"))
+DEFAULT_TIMEOUT = 600
+DEFAULT_MAX_CHARS = 6000
+MIN_RETRY_SECONDS = 30
+MAX_FIX_ROUNDS = 3
+FILLED_SHOWN = 20       # worker.filled entries printed (all are applied)
+UNMATCHED_SHOWN = 8     # worker.unmatched.values entries printed
+COMMANDS = ("run", "setup", "doctor", "verify", "note")
+
+
+def emit(obj, out=None, compact=False):
+    text = contract.dump(obj) if compact else json.dumps(obj, ensure_ascii=False, indent=2)
+    if out:
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    print(text)
+
+
+def read_log(path):
+    records = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    records.append(rec)
+    except FileNotFoundError:
+        pass
+    return records
+
+
+def task_text(task):
+    return "\n".join([task["goal"], task["context"]] + task["targets"] + task["questions"])
+
+
+def seen_addresses(task, log):
+    """Addresses the worker was shown: the task, and every full tool result."""
+    seen = contract.addresses(task_text(task))
+    for rec in log:
+        if rec.get("event") == "call" and rec.get("source") == "ida-mcp":
+            seen |= contract.result_addresses(rec.get("result") or "")
+            if rec.get("structured") is not None:
+                seen |= contract.addresses(json.dumps(rec["structured"]))
+    return seen
+
+
+def evaluate(outcome, task, log):
+    """(clean result or None, problems, raw reply text, extra).
+
+    References ({{N.path}}) are filled in before validation; extra holds
+    "filled" (refs.fill spans) and, for an acceptable result, "unmatched"
+    (long literals that match nothing the worker saw, see refs.unmatched).
+    """
+    extra = {"filled": [], "unmatched": []}
+    raw = outcome["final"]
+    if not raw:
+        raw = "\n".join(outcome["texts"])
+    problems = []
+    if outcome["timed_out"]:
+        problems.append("the worker timed out and was stopped")
+    elif outcome["final"] is None:
+        detail = "; ".join(outcome["errors"]) or outcome["stderr"].strip()[-500:]
+        problems.append("dsh ended without a final answer (exit %s): %s"
+                        % (outcome["exit"], detail or "no diagnostics"))
+    elif (outcome["reason"] or {}).get("kind") != "completed":
+        problems.append("the turn did not complete (%s): %s" % (
+            json.dumps(outcome["reason"]), "; ".join(outcome["errors"])
+            or outcome["stderr"].strip()[-300:] or "no diagnostics"))
+    obj = contract.extract_json(raw)
+    if not (isinstance(obj, dict) and ("status" in obj or "findings" in obj)):
+        broken = contract.json_problem(raw)
+        if broken:                 # a syntax slip, not a wrong shape: say where
+            return None, problems + [broken], raw, extra
+    table = refs.CallTable(log)
+    filled, rproblems = refs.fill(obj, table)
+    extra["filled"] = filled
+    clean, vproblems = contract.validate(obj, seen_addresses(task, log),
+                                         max_findings=task["max_findings"])
+    problems = problems + rproblems + vproblems
+    if clean is not None:
+        refs.mark_findings(clean, filled)
+        if not problems:
+            extra["unmatched"] = refs.unmatched(
+                clean, filled, lambda: refs.Haystack(task_text(task), log), table)
+            refs.mark_unmatched(clean, extra["unmatched"])
+    return clean, problems, raw, extra
+
+
+def audit(attempts, log, settings):
+    """Things that are impossible by construction; any of them voids the run."""
+    breaches, notes = [], []
+    for a in attempts:
+        for c in a["calls"]:
+            tool = c.get("tool")
+            if tool in IDA_TOOL_NAMES:
+                continue
+            err = c.get("error") or {}
+            if c.get("status") == "error" and err.get("code") == "UNKNOWN_TOOL":
+                notes.append("the model asked for %r, which is not registered; "
+                             "dsh rejected the call" % tool)
+            else:
+                breaches.append("the event stream shows a call to %r (status %s); "
+                                "only the ida tools should exist" % (tool, c.get("status")))
+    calls = [r for r in log if r.get("event") == "call"]
+    starts = [r for r in log if r.get("event") == "start"]
+    for r in log:
+        if r.get("event") == "anomaly":
+            breaches.append("guard proxy: %s" % r.get("reason"))
+        elif r.get("event") == "fatal":
+            notes.append("guard proxy stopped (fail closed): %s" % r.get("reason"))
+    for r in calls:
+        if not r.get("allowed") and r.get("source") == "ida-mcp":
+            breaches.append("ida-mcp answered refused call %s %s"
+                            % (r.get("tool"), json.dumps(r.get("arguments"))[:200]))
+    for s in starts:
+        if s.get("mode") != settings["mode"] or s.get("max_calls") != settings["max_calls"]:
+            breaches.append("guard proxy ran with mode %s / max %s instead of %s / %s"
+                            % (s.get("mode"), s.get("max_calls"), settings["mode"],
+                               settings["max_calls"]))
+    done = sum(1 for a in attempts for c in a["calls"]
+               if c.get("tool") in IDA_TOOL_NAMES and c.get("status") == "completed")
+    proxied = sum(1 for r in calls if r.get("allowed") and r.get("source") == "ida-mcp"
+                  and not r.get("is_error"))
+    if done > proxied:
+        breaches.append("%d ida tool results in the event stream, but only %d passed "
+                        "through the guard proxy" % (done, proxied))
+    used = sum(1 for r in calls if r.get("allowed") and r.get("tool") == "execute_python")
+    if used > settings["max_calls"]:
+        breaches.append("%d execute_python calls ran; the budget was %d"
+                        % (used, settings["max_calls"]))
+    return {"ok": not breaches, "breaches": breaches, "notes": notes}
+
+
+def build_task(args):
+    if args.task:
+        with open(args.task, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    else:
+        raw = {"goal": args.goal}
+        if args.target:
+            raw["targets"] = args.target
+        if args.question:
+            raw["questions"] = args.question
+    if not isinstance(raw, dict):
+        raise contract.ContractError("task must be a JSON object")
+    if args.context:
+        raw["context"] = (str(raw.get("context") or "") + "\n" + args.context).strip()
+    if args.mode:
+        raw["mode"] = args.mode
+    if args.max_calls is not None:
+        raw["max_calls"] = args.max_calls
+    if args.max_findings is not None:
+        raw["max_findings"] = args.max_findings
+    raw["db"] = os.path.abspath(os.path.expanduser(args.db))
+    return contract.load_task(raw)
+
+
+def make_run_dir(db):
+    base = os.path.basename(db)
+    name = "%s-%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), base, secrets.token_hex(2))
+    path = os.path.join(RUNS, name)
+    os.makedirs(os.path.join(path, "work"))
+    return path
+
+
+def blocked(problems, args, extra=None):
+    worker = {"valid": False, "problems": problems, "mode": args.mode or "strict"}
+    worker.update(extra or {})
+    return {"status": "blocked", "summary": "the worker did not start",
+            "findings": [], "unknowns": [], "needs": [], "worker": worker}
+
+
+def cmd_run(args):
+    if not args.task and not args.goal:
+        emit(blocked(["give --task FILE or --goal TEXT"], args), args.out, compact=True)
+        return 2
+    try:
+        task = build_task(args)
+    except (OSError, ValueError, contract.ContractError) as exc:
+        emit(blocked(["bad task: %s" % exc], args), args.out, compact=True)
+        return 2
+    db = task["db"]
+    if not (os.path.exists(db) or os.path.exists(db + ".i64") or os.path.exists(db + ".idb")):
+        emit(blocked(["database not found: %s" % db], args), args.out, compact=True)
+        return 2
+    backend = DshBackend()
+    problems = backend.problems()
+    if problems:
+        emit(blocked(problems, args), args.out, compact=True)
+        sys.stderr.write("rew: the worker profile is missing or out of date; "
+                         "run `rew setup`\n")
+        return 2
+
+    run_dir = make_run_dir(db)
+    settings = {"mode": task["mode"], "max_calls": task["max_calls"], "db": db,
+                "run_dir": run_dir, "log": os.path.join(run_dir, "guard.jsonl"),
+                "model": args.model, "effort": args.effort}
+    model = args.model or MODEL
+    effort = args.effort or EFFORT
+    prompt = contract.build_prompt(task)
+    with open(os.path.join(run_dir, "task.json"), "w") as fh:
+        json.dump(task, fh, indent=2)
+    with open(os.path.join(run_dir, "prompt.txt"), "w") as fh:
+        fh.write(prompt)
+    backend.write_overlay(settings)
+
+    started = time.time()
+    deadline = started + args.timeout
+    attempts = [backend.run(prompt, settings, args.timeout, tag="1")]
+    log = read_log(settings["log"])
+    clean, problems, raw, extra = evaluate(attempts[0], task, log)
+    first = attempts[0]
+    asked = False          # one round spent on long values that match no tool output
+    earlier = None         # the valid reply from before that round
+    # Correction rounds cost little (no lookups), and a run that took minutes
+    # should not be lost to one formatting slip, so allow a few.
+    while first["session"] and not attempts[-1]["timed_out"] \
+            and len(attempts) <= MAX_FIX_ROUNDS \
+            and deadline - time.time() >= MIN_RETRY_SECONDS:
+        if problems:
+            fix = contract.fix_prompt(problems)
+        elif extra["unmatched"] and not asked:
+            fix = refs.unmatched_prompt(extra["unmatched"])
+            asked = True
+            earlier = (clean, problems, raw, extra)
+        else:
+            break
+        tag = str(len(attempts) + 1)
+        with open(os.path.join(run_dir, "prompt-%s.txt" % tag), "w") as fh:
+            fh.write(fix)
+        attempts.append(backend.run(fix, settings, deadline - time.time(),
+                                    session=first["session"], tag=tag))
+        log = read_log(settings["log"])
+        clean, problems, raw, extra = evaluate(attempts[-1], task, log)
+    later_problems = None
+    if problems and earlier is not None:
+        # The question about typed values must not cost a valid result.
+        later_problems = problems
+        clean, problems, raw, extra = earlier
+
+    report = audit(attempts, log, settings)
+    tokens = {}
+    for a in attempts:
+        for k, v in a["usage"].items():
+            tokens[k] = tokens.get(k, 0) + v
+    if any(a["steps_without_usage"] for a in attempts):
+        tokens["incomplete"] = True
+    valid = not problems and report["ok"]
+    if not report["ok"]:
+        problems = ["AUDIT FAILED: " + b for b in report["breaches"]] + problems
+    calls = [r for r in log if r.get("event") == "call"]
+    worker = {
+        "valid": valid,
+        "problems": problems,
+        "mode": task["mode"],
+        "model": model,
+        "effort": effort,
+        "backend": backend.name,
+        "seconds": round(time.time() - started, 1),
+        "tool_calls": sum(len(a["calls"]) for a in attempts),
+        "refused": sum(1 for r in calls if not r.get("allowed")),
+        "budget": {"max_calls": task["max_calls"],
+                   "used": sum(1 for r in calls if r.get("allowed")
+                               and r.get("tool") == "execute_python")},
+        "tokens": tokens,
+        "session": first["session"],
+        "attempts": len(attempts),
+        "exit": [a["exit"] for a in attempts],
+        "reason": attempts[-1]["reason"],
+        "audit": report,
+        "run_dir": run_dir,
+    }
+    if extra["filled"]:
+        worker["filled"] = refs.filled_meta(extra["filled"], FILLED_SHOWN)
+        if len(extra["filled"]) > FILLED_SHOWN:
+            worker["filled_total"] = len(extra["filled"])
+    if extra["unmatched"] or asked:
+        worker["unmatched"] = refs.unmatched_meta(extra["unmatched"], asked, UNMATCHED_SHOWN)
+        if later_problems:
+            worker["unmatched"]["kept_earlier_reply"] = True
+            worker["unmatched"]["later_reply_problems"] = later_problems[:3]
+    if clean is None:
+        clean = {"status": "blocked", "summary": "", "findings": [], "unknowns": [],
+                 "needs": []}
+    result = dict(clean)
+    if not valid:
+        worker["raw"] = raw
+    if valid and clean["findings"]:
+        try:
+            worker["ledger"] = {"path": ledger.path_for(db), "ids": ledger.add_findings(
+                db, clean["findings"], task["goal"], "worker:%s:%s" % (model, task["mode"]),
+                run_dir)}
+        except OSError as exc:
+            worker["ledger"] = {"error": str(exc)}
+    result["worker"] = worker
+    full_path = os.path.join(run_dir, "result.json")
+    with open(full_path, "w") as fh:
+        json.dump(result, fh, ensure_ascii=False, indent=2)
+    emit(contract.fit_result(result, args.max_chars, full_path, extra["filled"]),
+         args.out, compact=True)
+    if not report["ok"]:
+        sys.stderr.write("rew: AUDIT FAILED - %s\n" % "; ".join(report["breaches"]))
+        return 3
+    return 0 if valid else 1
+
+
+def cmd_setup(args):
+    res = DshBackend().setup()
+    emit(res)
+    return 0 if res["ok"] else 1
+
+
+def cmd_doctor(args):
+    backend = DshBackend()
+    checks = backend.doctor()
+    ok = all(c["ok"] for c in checks)
+    emit({"ok": ok, "checks": checks})
+    return 0 if ok else 1
+
+
+def cmd_verify(args):
+    try:
+        rec = ledger.verify(args.db, args.id, args.ok, args.note)
+    except ledger.LedgerError as exc:
+        emit({"ok": False, "error": str(exc)})
+        return 1
+    emit({"ok": True, "ledger": ledger.path_for(args.db), "record": rec})
+    return 0
+
+
+def cmd_note(args):
+    try:
+        rec = ledger.add_note(args.db, args.claim, args.evidence, args.confidence)
+    except ledger.LedgerError as exc:
+        emit({"ok": False, "error": str(exc)})
+        return 1
+    emit({"ok": True, "ledger": ledger.path_for(args.db), "record": rec})
+    return 0
+
+
+def parser():
+    ap = argparse.ArgumentParser(prog="rew", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd")
+    run = sub.add_parser("run", help="run one worker")
+    run.add_argument("--db", required=True, help="binary or .i64 the worker reads")
+    run.add_argument("--task", help="task JSON file")
+    run.add_argument("--goal")
+    run.add_argument("--target", action="append")
+    run.add_argument("--question", action="append")
+    run.add_argument("--context")
+    run.add_argument("--mode", choices=("strict", "free"))
+    run.add_argument("--max-calls", type=int)
+    run.add_argument("--max-findings", type=int)
+    run.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,
+                     help="budget for the printed result (default %(default)s)")
+    run.add_argument("--effort", choices=EFFORTS)
+    run.add_argument("--model")
+    run.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    run.add_argument("--out")
+    sub.add_parser("setup", help="create or refresh the re-worker dsh profile")
+    sub.add_parser("doctor", help="check the installation")
+    ver = sub.add_parser("verify", help="record a verdict on a finding")
+    ver.add_argument("--db", required=True)
+    ver.add_argument("--id", required=True)
+    verdict = ver.add_mutually_exclusive_group(required=True)
+    verdict.add_argument("--ok", dest="ok", action="store_true")
+    verdict.add_argument("--reject", dest="ok", action="store_false")
+    ver.add_argument("--note")
+    note = sub.add_parser("note", help="record the orchestrator's own verified finding")
+    note.add_argument("--db", required=True)
+    note.add_argument("--claim", required=True)
+    note.add_argument("--evidence", nargs="+", required=True)
+    note.add_argument("--confidence", default="high", choices=ledger.CONFIDENCE)
+    return ap
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] not in COMMANDS and argv[0] not in ("-h", "--help"):
+        argv.insert(0, "run")
+    args = parser().parse_args(argv)
+    if not args.cmd:
+        parser().print_help()
+        return 2
+    return {"run": cmd_run, "setup": cmd_setup, "doctor": cmd_doctor,
+            "verify": cmd_verify, "note": cmd_note}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

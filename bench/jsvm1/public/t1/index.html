@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>潮汐票务 - 搜索</title></head>
+<body>
+<form id="f"><input id="q" name="q" placeholder="演出、场馆、城市"><select id="page" name="page"><option>1</option><option>2</option></select><button>搜索</button></form>
+<pre id="out"></pre>
+<script src="app.js"></script>
+<script>
+document.getElementById('f').addEventListener('submit', function (e) {
+  e.preventDefault();
+  TW.request('/api/v2/search', { q: document.getElementById('q').value, page: document.getElementById('page').value })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { document.getElementById('out').textContent = JSON.stringify(j, null, 2); });
+});
+</script>
+</body>
+</html>

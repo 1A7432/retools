@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>潮汐票务 - 电子票</title></head>
+<body>
+<p>账户 <span id="uid">88231</span> 的入场二维码：</p>
+<pre id="out"></pre>
+<script src="app.js"></script>
+<script>
+TW.ticket(+document.getElementById('uid').textContent)
+  .then(function (r) { return r.json(); })
+  .then(function (j) { document.getElementById('out').textContent = JSON.stringify(j, null, 2); });
+</script>
+</body>
+</html>
