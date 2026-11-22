@@ -96,3 +96,70 @@ def verify(db, fid, ok, note=None):
 
 def load(db):
     return _notes.load(db)
+
+
+# Words that mark a claim as a judgement about purpose rather than a statement
+# of what the code does. Workers got their facts right far more often than
+# their characterisations, so these are checked first.
+_JUDGEMENT = ("purpose", "used for", "used to", "responsible for", "intended",
+              "likely", "probably", "appears", "seems", "suggests", "presumably",
+              "malicious", "backdoor", "injection", "inject", "persistence", "c2",
+              "exfiltrat", "keylog", "anti-debug", "obfuscat", "decoy", "implements",
+              "用于", "负责", "目的", "可能", "疑似", "应该", "推测", "看起来", "注入", "后门",
+              "持久化", "窃取", "诱饵", "实现")
+
+
+def priority(note):
+    """(score, reasons): higher means check sooner. A heuristic for ordering
+    the backlog, not a measure of whether the claim is right."""
+    score, reasons = 0, []
+    if note.get("grounded") is False:
+        score += 4
+        reasons.append("evidence never appeared in the worker's tool results")
+    claim = str(note.get("claim") or "").lower()
+    hit = next((w for w in _JUDGEMENT if w in claim), None)
+    if hit:
+        score += 2
+        reasons.append("judgement about purpose (%s)" % hit)
+    conf = note.get("confidence")
+    if conf == "low":
+        score += 2
+        reasons.append("low confidence")
+    elif conf != "high":
+        score += 1
+        reasons.append("%s confidence" % (conf or "no"))
+    return score, reasons
+
+
+def backlog(db):
+    """Worker findings nobody has ruled on, most urgent first."""
+    out = []
+    for n in _notes.load(db):
+        if n.get("verified") is not None:
+            continue
+        score, reasons = priority(n)
+        out.append({"id": n["id"], "priority": score, "why": reasons,
+                    "confidence": n.get("confidence"), "claim": n.get("claim"),
+                    "evidence": n.get("evidence") or [], "source": n.get("source")})
+    out.sort(key=lambda r: -r["priority"])     # stable: ledger order within a score
+    return out
+
+
+def summary():
+    """Per ledger file: how many findings are verified, rejected, still open."""
+    root = _notes.resolve_dir()
+    rows = []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        names = []
+    for name in names:
+        if not name.endswith(".jsonl"):
+            continue
+        notes = _notes.load(name[:-len(".jsonl")])
+        rows.append({"db": name[:-len(".jsonl")],
+                     "open": sum(n.get("verified") is None for n in notes),
+                     "verified": sum(n.get("verified") is True for n in notes),
+                     "rejected": sum(n.get("verified") is False for n in notes)})
+    rows.sort(key=lambda r: -r["open"])
+    return rows

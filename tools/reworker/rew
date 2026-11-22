@@ -9,6 +9,9 @@
     rew doctor                   check dsh, the profile, the proxy and ida-mcp
     rew verify --db PATH --id ID (--ok | --reject) [--note TEXT]
     rew note --db PATH --claim TEXT --evidence EA... [--confidence high|medium|low]
+    rew backlog [--db PATH [--limit N] [--max-chars N]]
+                                 findings nobody has ruled on; without --db, counts
+                                 per database
 
 `rew run` prints exactly one JSON object: the validated result plus a `worker`
 object. Exit 0 means a valid result; 1 an invalid one; 2 that the worker could
@@ -42,7 +45,7 @@ MIN_RETRY_SECONDS = 30
 MAX_FIX_ROUNDS = 3
 FILLED_SHOWN = 20       # worker.filled entries printed (all are applied)
 UNMATCHED_SHOWN = 8     # worker.unmatched.values entries printed
-COMMANDS = ("run", "setup", "doctor", "verify", "note")
+COMMANDS = ("run", "setup", "doctor", "verify", "note", "backlog")
 
 
 def emit(obj, out=None, compact=False):
@@ -378,6 +381,31 @@ def cmd_note(args):
     return 0
 
 
+def cmd_backlog(args):
+    if not args.db:
+        rows = ledger.summary()
+        emit({"ok": True, "open": sum(r["open"] for r in rows), "databases": rows})
+        return 0
+    items = ledger.backlog(args.db)
+    shown, used = [], 0
+    for it in items[:args.limit]:
+        claim = it["claim"] or ""
+        if len(claim) > 240:
+            it = dict(it, claim=claim[:240] + "...", claim_cut=len(claim))
+        size = len(json.dumps(it, ensure_ascii=False))
+        if shown and used + size > args.max_chars:
+            break
+        shown.append(it)
+        used += size
+    out = {"ok": True, "ledger": ledger.path_for(args.db), "open": len(items),
+           "shown": len(shown), "items": shown}
+    if len(shown) < len(items):
+        out["more"] = ("%d more; rule on these with `rew verify`, then run backlog again"
+                       % (len(items) - len(shown)))
+    emit(out)
+    return 0
+
+
 def parser():
     ap = argparse.ArgumentParser(prog="rew", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd")
@@ -411,6 +439,10 @@ def parser():
     note.add_argument("--claim", required=True)
     note.add_argument("--evidence", nargs="+", required=True)
     note.add_argument("--confidence", default="high", choices=ledger.CONFIDENCE)
+    back = sub.add_parser("backlog", help="findings nobody has ruled on")
+    back.add_argument("--db", help="binary or .i64; without it, counts per database")
+    back.add_argument("--limit", type=int, default=20)
+    back.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     return ap
 
 
@@ -423,7 +455,8 @@ def main(argv=None):
         parser().print_help()
         return 2
     return {"run": cmd_run, "setup": cmd_setup, "doctor": cmd_doctor,
-            "verify": cmd_verify, "note": cmd_note}[args.cmd](args)
+            "verify": cmd_verify, "note": cmd_note,
+            "backlog": cmd_backlog}[args.cmd](args)
 
 
 if __name__ == "__main__":

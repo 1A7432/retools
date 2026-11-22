@@ -146,6 +146,14 @@ def run():
 
         # -- verify / note -------------------------------------------------------------
         fid = notes[0]["id"]
+        rc, out, _ = e.rew("backlog", "--db", e.db)
+        expect("backlog lists every open finding, ungrounded first", rc == 0
+               and out["open"] == 3 and out["shown"] == 3
+               and out["items"][0]["id"] == notes[2]["id"]
+               and any("never appeared" in w for w in out["items"][0]["why"]), out)
+        rc, out, _ = e.rew("backlog", "--db", e.db, "--limit", "1")
+        expect("backlog --limit says how many are left", out["shown"] == 1
+               and out["more"].startswith("2 more"), out)
         rc, out, _ = e.rew("verify", "--db", e.db, "--id", fid, "--ok", "--note", "read it")
         expect("verify ok", rc == 0 and out["record"]["verified"] is True)
         rc, out, _ = e.rew("verify", "--db", e.db, "--id", notes[2]["id"], "--reject")
@@ -160,6 +168,13 @@ def run():
         state = {n["id"]: n for n in _notes.load("sample.bin", os.path.join(tmp, "findings"))}
         expect("ledger state after verify", state[fid]["verified"] is True
                and state[notes[2]["id"]]["verified"] is False and len(state) == 4, state)
+        rc, out, _ = e.rew("backlog", "--db", e.db)
+        expect("ruled-on findings leave the backlog", out["open"] == 1
+               and out["items"][0]["id"] == notes[1]["id"], out)
+        rc, out, _ = e.rew("backlog")
+        expect("backlog without --db counts per database", rc == 0 and out["open"] == 1
+               and out["databases"] == [{"db": "sample.bin", "open": 1, "verified": 2,
+                                         "rejected": 1}], out)
         expect("note is in range", [n["claim"] for n in _notes.in_range(
             list(state.values()), 0x401020, 0x401021)] == ["orchestrator claim"])
 

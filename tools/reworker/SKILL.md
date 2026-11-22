@@ -277,6 +277,13 @@ A worker's finding is a lead with addresses attached, not a fact.
   are usually reliable when grounded.
 - If two findings disagree, read the code yourself.
 
+`rew backlog` (no arguments) counts the findings nobody has ruled on, per
+database. `rew backlog --db PATH` lists them, most urgent first: findings whose
+evidence never appeared in the worker's tool results, then claims about purpose
+(the kind workers get wrong), then low confidence. The order is a heuristic for
+what to check first, not a judgement of the claim. An unverified finding is not
+a fact; do not quote one in a report.
+
 An example from the trial: a worker reported that a function "is the binary's
 cross-process injection routine" because it calls OpenProcess and
 VirtualAllocEx. Every API in the claim was really called. Reading the code
