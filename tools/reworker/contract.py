@@ -26,7 +26,15 @@ MODE_TEXT = {
     "strict": ("In this run execute_python accepts only rekit calls with literal "
                "arguments, for example rekit.fn(0x1234) or "
                '{"a": rekit.xrefs("sub_1234"), "b": rekit.code(0x1234, start=80)}. '
-               "Anything else is refused before it runs."),
+               "Anything else is refused before it runs. What gets refused most, "
+               "and what to write instead: (1) a loop or comprehension over "
+               "addresses - use rekit.batch([0x401000, 0x401080]) or a dict literal "
+               "with one rekit call per entry; (2) arithmetic such as "
+               "0x401000 + 0x38 - write the result, 0x401038, and use rekit.calc "
+               "for real computation; (3) calls to anything but rekit (hex, len, "
+               "print, sorted, idc, ida_*) and if/else - return the rekit result "
+               "as it is and decide in your next call. Keep a snippet to a few "
+               "lines so its brackets are easy to balance."),
     "free": ("In this run execute_python also accepts plain IDAPython for reading "
              "(ida_* modules, idautils, idc, and the ida-domain `db` object), for "
              "the lookups rekit does not cover. Prefer rekit where it fits: its "

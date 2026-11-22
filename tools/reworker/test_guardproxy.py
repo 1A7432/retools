@@ -93,6 +93,18 @@ def run():
         if not cond:
             bad.append("%s %s" % (label, detail))
 
+    sys.path.insert(0, HERE)
+    import guardproxy as gp
+    expect("label: plenty left says nothing more",
+           gp.call_label(3, 25).rstrip("\n").endswith("{{3.ret}}"))
+    expect("label: low budget warns with the count",
+           "5 calls left" in gp.call_label(20, 25) and "1 call left" in gp.call_label(24, 25)
+           and "calls left" not in gp.call_label(19, 25))
+    expect("label: last call says so", "last call" in gp.call_label(25, 25)
+           and gp.call_label(25, 25).startswith("[call 25 of 25] "))
+    expect("label: small budgets warn on the call before last",
+           "1 call left" in gp.call_label(3, 4) and "left" not in gp.call_label(2, 4))
+
     with tempfile.TemporaryDirectory() as tmp:
         # -- list filtering, refusal shape, budget, log ------------------------
         s = Session(tmp, max_calls=2, server_args=["--big", "20000"])

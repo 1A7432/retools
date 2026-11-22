@@ -60,8 +60,17 @@ def budget_message(used):
 
 def call_label(n, max_calls):
     """The line shown above execute_python result number n."""
+    left = max_calls - n
+    note = ""
+    if left <= 0:
+        note = ". This was your last call: write the result JSON now"
+    elif left <= max(1, max_calls // 5):
+        # Runs that hit the budget unprepared came back partial; say so while
+        # there is still room to choose the lookups that matter.
+        note = (". %d call%s left: make only the lookups your answer still "
+                "depends on, then write the result JSON" % (left, "" if left == 1 else "s"))
     return ("[call %d of %d] quote values from this result as {{%d.path}}, "
-            "e.g. {{%d.ret}}\n" % (n, max_calls, n, n))
+            "e.g. {{%d.ret}}%s\n" % (n, max_calls, n, n, note))
 
 
 def result_text(result):
