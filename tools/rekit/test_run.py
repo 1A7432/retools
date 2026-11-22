@@ -114,6 +114,8 @@ def run():
             bad.append(label)
 
     root = tempfile.mkdtemp(prefix="test-run-")
+    # rebox runs started here must not land in the checkout's tmp/rebox-runs
+    os.environ["REBOX_RUNS"] = os.path.join(root, "rebox-runs")
     sample = os.path.join(root, "prog")
     blob = b"\x7fELF fake sample bytes"
     with open(sample, "wb") as fh:

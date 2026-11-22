@@ -34,7 +34,8 @@ from . import live_elf, live_summary
 from .summary import SCHEMA
 
 TOOL_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_RUNS_DIR = TOOL_DIR.parent.parent / "tmp" / "rebox-runs"
+# REBOX_RUNS moves the default output root (the tests point it at a temp dir).
+DEFAULT_RUNS_DIR = Path(os.environ.get("REBOX_RUNS") or TOOL_DIR.parent.parent / "tmp" / "rebox-runs")
 
 EXIT_OK = 0
 EXIT_USAGE = 2

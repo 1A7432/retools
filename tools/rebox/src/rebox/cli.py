@@ -27,7 +27,8 @@ from pathlib import Path
 from . import elfsetup, sandbox, summary
 
 TOOL_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_RUNS_DIR = TOOL_DIR.parent.parent / "tmp" / "rebox-runs"
+# REBOX_RUNS moves the default output root (the tests point it at a temp dir).
+DEFAULT_RUNS_DIR = Path(os.environ.get("REBOX_RUNS") or TOOL_DIR.parent.parent / "tmp" / "rebox-runs")
 VERSION = "rebox 0.1.0"
 
 EXIT_OK = 0

@@ -1,8 +1,11 @@
+import atexit
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +14,11 @@ TOOL_DIR = Path(__file__).resolve().parents[1]
 LAUNCHER = TOOL_DIR / "rebox"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Runs started without --out must not land in the checkout's tmp/rebox-runs.
+_RUNS = tempfile.mkdtemp(prefix="rebox-test-runs-")
+os.environ["REBOX_RUNS"] = _RUNS
+atexit.register(shutil.rmtree, _RUNS, ignore_errors=True)
 
 # Benign Windows launcher stubs that ship with pip (distlib). Never executed natively.
 PIP_STUB_GLOBS = [
