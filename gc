@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Remove old local run data under tmp/. Prints what it would delete; pass
+--apply to delete.
+
+    ./gc                         what the default rules would remove
+    ./gc --apply                 remove it
+    ./gc --rebox-days 7          keep fewer days of rebox runs (default 14)
+    ./gc --rew-days 30           also remove worker run records older than this
+    ./gc --jsw-days 30           also remove jsw run records older than this
+
+Default rules:
+  tmp/rebox-runs/    runs older than --rebox-days
+  tmp/rekit-images/  all but the newest image of each database (they are
+                     caches; rekit rebuilds one when it is needed)
+Worker run records (tmp/rew-runs, tmp/jsw-runs) are what ledger entries point
+back to, so they are only removed when a --rew-days / --jsw-days is given.
+Only directories whose names look like this tool's own output are touched.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import re
+import shutil
+import sys
+
+ROOT = os.path.dirname(os.path.realpath(__file__))
+TMP = os.path.join(ROOT, "tmp")
+STAMP = re.compile(r"(?<!\d)(20\d{6})-(\d{6})(?!\d)")
+REBOX_NAME = re.compile(r"^[0-9a-f]{12}-(live-)?20\d{6}-\d{6}(-\d+)?$")
+RUN_NAME = re.compile(r"^20\d{6}-\d{6}-.+")
+IMAGE_NAME = re.compile(r"^(?P<db>.+)\.(?P<hash>[0-9a-f]{12})$")
+
+
+def size(path):
+    total = 0
+    for d, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(d, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def stamp(name):
+    m = STAMP.search(name)
+    if not m:
+        return None
+    try:
+        return dt.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+
+
+def entries(sub):
+    path = os.path.join(TMP, sub)
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        return []
+    return [(n, os.path.join(path, n)) for n in names
+            if os.path.isdir(os.path.join(path, n)) and not os.path.islink(os.path.join(path, n))]
+
+
+def older_than(sub, pattern, days, now):
+    out = []
+    for name, path in entries(sub):
+        when = stamp(name) if pattern.match(name) else None
+        if when is not None and (now - when).days >= days:
+            out.append(path)
+    return out
+
+
+def stale_images():
+    groups = {}
+    for name, path in entries("rekit-images"):
+        m = IMAGE_NAME.match(name)
+        if m:
+            groups.setdefault(m.group("db"), []).append((os.path.getmtime(path), path))
+    out = []
+    for items in groups.values():
+        items.sort()
+        out += [p for _t, p in items[:-1]]
+    return out
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--apply", action="store_true", help="delete instead of listing")
+    ap.add_argument("--rebox-days", type=int, default=14)
+    ap.add_argument("--rew-days", type=int)
+    ap.add_argument("--jsw-days", type=int)
+    a = ap.parse_args(argv)
+    for v in (a.rebox_days, a.rew_days, a.jsw_days):
+        if v is not None and v < 0:
+            ap.error("days must not be negative")
+    now = dt.datetime.now()
+    plan = [("rebox runs older than %d days" % a.rebox_days,
+             older_than("rebox-runs", REBOX_NAME, a.rebox_days, now)),
+            ("superseded rekit images", stale_images())]
+    if a.rew_days is not None:
+        plan.append(("worker runs older than %d days" % a.rew_days,
+                     older_than("rew-runs", RUN_NAME, a.rew_days, now)))
+    if a.jsw_days is not None:
+        plan.append(("jsw runs older than %d days" % a.jsw_days,
+                     older_than("jsw-runs", RUN_NAME, a.jsw_days, now)))
+    total = 0
+    for label, paths in plan:
+        nbytes = sum(size(p) for p in paths)
+        total += nbytes
+        print("%-34s %4d dirs  %8.1f MB" % (label, len(paths), nbytes / 1e6))
+        for p in paths:
+            if a.apply:
+                shutil.rmtree(p)
+            elif len(paths) <= 12:
+                print("    " + os.path.relpath(p, ROOT))
+    print("%s %.1f MB" % ("removed" if a.apply else "would remove", total / 1e6))
+    if not a.apply and total:
+        print("nothing was deleted; rerun with --apply")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
