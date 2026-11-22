@@ -76,5 +76,5 @@
 - **glibc 动态链接的 ELF 在仿真里解析不了域名**：rootfs 里没有 `libnss_dns`。查询的域名仍会被记录，但样本自己看到的是解析失败。需要看解析之后的行为时用 `rebox live --fakenet`。
 - `rekit.crypto` 扫不到按公式现场计算的常量（SM4 的 CK、AES 的 Rcon）和用 SIMD 从别的数据算出来的常量。
 - `rekit.run` 对 Windows PE 抓不到控制台输出，也不支持标准输入。
-- 运行记录目录 `tmp/` 没有自动清理。
-- 测试入口不统一：`remu`、`recalc`、`rebox` 用 pytest，其余是 `python3 test_x.py` 脚本。
+- 运行记录目录 `tmp/` 不会自动清理，要手动跑 `./gc --apply`。
+- 测试框架不统一：`remu`、`recalc`、`rebox` 用 pytest，其余是 `python3 test_x.py` 脚本。`./test` 把它们串成了一个入口。

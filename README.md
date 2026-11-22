@@ -4,6 +4,8 @@
 
 出发点：通用模型做逆向的瓶颈在接口，不在模型。小模型猜 IDAPython API 容易错，所以把接口固定下来，并用机械手段限制它能做什么。
 
+> **这是一份个人工具的快照，不是受维护的项目。** 它只在作者自己的机器上跑过（macOS、Apple Silicon）。Issues 已关闭，不接受功能请求，PR 不保证会看，没有版本号，也不承诺接口稳定。公开它是为了让设计和实测数据可以被查看和引用；要用的话请 fork。
+
 ## 部件
 
 | 部件 | 做什么 | 文档 |
@@ -78,13 +80,12 @@ import rekit; rekit.help()
 ## 测试
 
 ```sh
-for t in remu recalc rebox; do (cd tools/$t && .venv/bin/python -m pytest -q); done
-for f in tools/reworker/test_*.py tools/rekit/test_*.py tools/jsworker/tests/test_unit.py; do
-  (cd "$(dirname "$f")" && python3 "$(basename "$f")" | tail -1)
-done
+./test
 ```
 
-需要 Docker 的测试在 Docker 没开时会跳过或失败；`reworker/test_integration.py` 需要真实的 `dsh`。
+一个入口跑全部测试集。需要 Docker 或真实 `dsh` 的测试集在条件不满足时会跳过并说明原因。
+
+`./gc` 列出 `tmp/` 下可以清理的旧运行数据，加 `--apply` 才真的删除。
 
 ## 题库
 
