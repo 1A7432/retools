@@ -41,12 +41,17 @@ End the snippet with the call so its dict becomes the tool result. Do not
 | `rekit.fn(ea, code="none")` | the card without code, about 1 KB; use it to triage |
 | `rekit.code(ea, mode="trim", start=0)` | pseudocode only, paginated by line |
 | `rekit.xrefs(ea, limit=20)` | references to a function or data address, grouped by referencing function |
-| `rekit.calls(ea, depth=2, dir="out")` | call tree as indented text; `dir="in"` walks callers |
+| `rekit.calls(ea, depth=2, dir="out")` | call tree as indented text; `dir="in"` walks callers, and also lists functions that only take the address (`[addr X]`) and pointers stored in data (`[data]`) |
 | `rekit.find(name=...)` | symbols by substring; imports first, then functions, then data |
 | `rekit.find(string=...)` | strings by content, with the functions that use them |
 | `rekit.find(bytes="FD 7B ?? A9")` | byte pattern with wildcards |
 | `rekit.find(imm=0x9E3779B9)` | instructions using an immediate value |
 | `rekit.disasm(ea, n=40)` | compact disassembly; continue from the returned `next` |
+| `rekit.scan(ea)` | inside one function, or `[ea, end)` with `end=`: direct calls counted by target, plus the number of indirect calls |
+| `rekit.scan(ea, show="imms", min=0x10000)` | the distinct immediates used there, with counts; `mnem=["MOV", "EOR"]` keeps only those instructions |
+| `rekit.scan(ea, imm=0x5BD1E995)` | every use of one immediate there |
+| `rekit.scan(ea, to="_syscall", reg="w0")` | every call site of one target, and the immediate moved into a register before each call |
+| `rekit.decode(ea)` | strings the function builds at run time in its one-time initialisers, recovered by emulation |
 | `rekit.batch([ea, ...])` | several cards in one call (at most 40) |
 | `rekit.notes(ea)` | findings recorded earlier for this function, or for the whole database without `ea` |
 | `rekit.emu(ea, args=[...], cc=...)` | run one function in an emulator: return value, buffers it changed, memory it wrote, API calls it made |
@@ -59,6 +64,75 @@ End the snippet with the call so its dict becomes the tool result. Do not
 String search covers C strings, plus UTF-16 for Windows PE files; for other
 formats pass `wide=True` to include UTF-16 (a miss tells you so). A pattern
 with non-ASCII characters searches a separate, larger index built on first use.
+
+## Code too big to decompile
+
+A flattened or virtualised function of hundreds of thousands of instructions
+cannot be decompiled, and a database-wide `find(imm=...)` runs out of time.
+`rekit.scan` answers the questions that remain, limited to one function (all
+its chunks) or to an address range with `end=`:
+
+```python
+rekit.scan("sub_1A2B3C0")                              # what it calls, by count
+rekit.scan("sub_1A2B3C0", show="imms")                 # which constants it uses
+rekit.scan("sub_1A2B3C0", imm=0x5BD1E995)              # where one constant is used
+rekit.scan("sub_1A2B3C0", to="_syscall", reg="w0")     # which system calls it makes
+```
+
+The range is read once (a few seconds for 470,000 instructions) and kept for
+later questions about the same range; `refresh=True` reads it again. Immediate
+operands that IDA resolved to an address are not listed. A jump to the start
+of another function counts as a call and is marked `tail`.
+
+With `reg`, each site shows the immediate that the last write to that
+register moved in, read backwards along the straight line into the call.
+`values` is the distribution over all sites. A site shows `?` and the reason
+when that write is not an immediate (`MOV X0, X19`), when a jump target
+intervenes (another path may bring a different value) or when an earlier call
+left its result there. Read those sites with `rekit.disasm`. It follows
+registers only: arguments pushed on the stack (32-bit x86) are not found, and
+on x86 a write to a sub-register (`al`) is not seen as a write to `eax`.
+
+## Strings built at run time
+
+Some strings are not in the file. The compiler splits a short literal into
+integer constants, or an obfuscator stores it encrypted and decodes it on
+first use; either way the code is a one-time initialiser guarded by a flag
+byte: read the flag, skip if set, build the string, set the flag. A card finds
+those initialisers (a writable byte the function both reads and writes),
+emulates each one from the flag read to just after the flag write, and shows
+what they wrote under `decoded`:
+
+```
+"decoded": {"total": 8, "top": [
+    "0x81f2b4c \"FetchRemotePolicyForDevice\" | init 0x2f4dc4-0x2f4e38",
+    "0x81f2a10 \"policy_manager.cc\" | init 0x2f50d8-0x2f5124 | loop"], ...}
+```
+
+The address is where the string is built, `init` is the code that builds it,
+and `loop` means it was computed in a loop (an XOR decode, scalar or
+vectorised) rather than stored piecewise. These strings come from running the
+function's own code on the file's initial memory, so they are what the
+program would have there; they are still not literals, so say "decoded" when
+you quote one. `rekit.decode(ea)` lists all of them. `decode=False` on `fn`
+and `batch` skips the emulation.
+
+Related card fields:
+
+- `consts` shows a constant's bytes as text when they are all printable
+  (`0x6d65526863746546 "FetchRem"`). That is one fragment. Fragments are never
+  joined by guesswork; the joined string is under `decoded` when the
+  initialiser could be run.
+- `strings` leaves out constant-pool entries that an initialiser reads a few
+  bytes from and IDA mistook for a string; `decoded.replaces` counts them.
+- `decoded.failed` counts initialisers that did not run to their end (they
+  call into code that needs state the snapshot lacks); `decoded.unavailable`
+  means emulation could not run at all. In both cases `strings` is unchanged.
+
+Not covered: statics guarded by `__cxa_guard_acquire` (tried, and too few of
+them run to the end to be worth showing), strings built on the stack with no
+flag (only the `consts` fragments are marked), and decode routines that take
+arguments: call those with `rekit.emu`.
 
 ## Emulation
 
@@ -216,8 +290,9 @@ conclusions remain yours to justify.
 ## Limits
 
 - Read-only towards the database by design. It never renames, comments,
-  retypes, or patches. `rekit.emu` and `rekit.image` write a snapshot to a
-  cache directory outside the database.
+  retypes, or patches. `rekit.emu`, `rekit.image` and the `decoded` field of
+  cards write a snapshot to a cache directory outside the database; the first
+  card of a function with initialisers pays for that export once.
 - Function strings include Delphi literals and UTF-16 runs that IDA left
   untyped; a rare false string is possible there.
 - Functions larger than 64 KB are not decompiled unless you pass `force=True`.

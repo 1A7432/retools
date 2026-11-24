@@ -29,15 +29,17 @@ import ida_bytes
 import ida_funcs
 import ida_hexrays
 import ida_ida
+import ida_idp
 import ida_nalt
 import ida_name
 import ida_search
 import ida_segment
 import ida_strlist
 import ida_typeinf
+import ida_ua
 import ida_xref
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 BUDGET = 6000            # default max chars of one result
 BIG_FUNC = 0x10000       # bytes; above this decompiling needs force=True
@@ -60,9 +62,22 @@ An address argument may be an int, "0x1234", a symbol name, or a ref string.
       code="trim"|"raw"|"none"      default "trim"
   rekit.code(ea, mode="trim")       pseudocode only; paginate with start=<line>
   rekit.xrefs(ea)                   who references ea, grouped by function
-  rekit.calls(ea, depth=2, dir="out"|"in")   call tree as indented text
+  rekit.calls(ea, depth=2, dir="out"|"in")   call tree as indented text; "in"
+                                    also lists functions that only take the
+                                    address [addr] and pointers in data [data]
   rekit.find(name=..|string=..|bytes=..|imm=..)   one criterion, regex=True ok
   rekit.disasm(ea, n=40)            compact disassembly, continue with "next"
+  rekit.scan(ea)                    inside one function, or [ea, end) with end=:
+                                    direct calls counted by target. For code
+                                    too big or too obfuscated to decompile
+      show="imms", min=0x10000      the distinct immediates used there
+      imm=0x9E3779B9                where one immediate is used there
+      to="_syscall", reg="w0"       every call site of one target, with the
+                                    immediate put in a register before the call
+  rekit.decode(ea)                  strings this function builds at run time in
+                                    flag-guarded one-time initialisers (split
+                                    constants, XOR loops), found by emulation;
+                                    cards show them as "decoded"
   rekit.batch([ea, ...], code="none")         several cards in one call
   rekit.notes(ea)                   findings recorded earlier for this function
   rekit.emu(ea, args=[...], cc=..)  run one function in an emulator and see
@@ -86,6 +101,9 @@ Conventions
   trim       folds the local-variable block and drops pointer casts that
              cannot change meaning; mode="raw" is the untouched Hex-Rays text
   read-only  to rename / comment / retype, use plain IDAPython yourself
+  decoded    a card's "decoded" strings are built at run time: the function's
+             one-time initialisers were emulated to get them. A quoted text
+             beside a constant is that constant's bytes, a fragment only
   slow once  the first find(string=...) builds the string index (about 10 s
              on a very large database); later searches are instant
 """ % (__version__, BUDGET)
@@ -409,6 +427,7 @@ def _scan(f, max_insn=60000):
     """Outgoing references of a function: calls, imports, strings, globals."""
     start = f.start_ea
     calls, imps, strs, globs = {}, {}, {}, {}
+    reads, writes, str_sites = {}, {}, {}
     seen, capped = 0, False
     for cs, ce in idautils.Chunks(start):
         for head in idautils.Heads(cs, ce):
@@ -436,9 +455,14 @@ def _scan(f, max_insn=60000):
                     else:
                         calls[to] = calls.get(to, 0) + 1
                 else:
+                    if x.type == ida_xref.dr_R:
+                        reads.setdefault(to, head)
+                    elif x.type == ida_xref.dr_W:
+                        writes.setdefault(to, []).append(head)
                     text = _str_at(to)
                     if text is not None:
                         strs.setdefault(text, to)
+                        str_sites.setdefault(text, []).append(head)
                     elif not f.contains(to) and ida_bytes.is_mapped(to):
                         # own labels are not globals; unmapped targets are
                         # struct-member and enum references, not addresses
@@ -450,6 +474,7 @@ def _scan(f, max_insn=60000):
             break
     return {"calls": calls, "imps": _quiet(imps, lambda n: n), "strs": strs,
             "globs": _quiet(globs, ida_name.get_name),
+            "reads": reads, "writes": writes, "str_sites": str_sites,
             "insns": seen, "capped": capped}
 
 
@@ -610,9 +635,22 @@ def _consts(raw_lines, top=8):
             hexed = "%#x" % val
             if re.fullmatch(r"0x(f+|7f+|80+|a+|5+)", hexed):
                 continue          # masks, sign bits and fill patterns
+            text = _const_text(val)
+            if text:
+                hexed = '%s "%s"' % (hexed, text)
             if hexed not in seen:
                 seen.append(hexed)
     return seen[:top], len(seen)
+
+
+def _const_text(val):
+    """The constant's little-endian bytes when they are all printable text."""
+    if not 0 < val < 1 << 64:
+        return None
+    raw = val.to_bytes(8, "little").rstrip(b"\0")
+    if len(raw) >= 4 and all(0x20 <= b < 0x7F and b not in (0x22, 0x5C) for b in raw):
+        return raw.decode("ascii")
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -837,7 +875,7 @@ def _notes_in(lo=None, hi=None):
     return [n for n in found if n.get("verified") is not False]
 
 
-def _card(f, code, max_chars, top, force):
+def _card(f, code, max_chars, top, force, decode=True, scan=None):
     start = f.start_ea
     out = {"fn": _ref(start), "ea": "%#x" % start, "size": _fsize(f)}
     noted = []
@@ -858,7 +896,7 @@ def _card(f, code, max_chars, top, force):
     if f.flags & ida_funcs.FUNC_LIB:
         flags.append("library")
     out["callers"] = _callers(start, top)
-    scan = _scan(f)
+    scan = scan or _scan(f)
     if not scan["calls"] and not scan["imps"]:
         flags.append("leaf")
     if flags:
@@ -869,14 +907,39 @@ def _card(f, code, max_chars, top, force):
     lst, total = _ranked(scan["imps"], lambda n: _short(n, 60), top + 8)
     if total:
         out["imports"] = {"total": total, "top": lst}
-    if scan["strs"]:
-        texts = list(scan["strs"])
+    dec = _decoded(f, scan) if decode else None
+    texts = list(scan["strs"])
+    hidden = 0
+    if dec and dec["items"]:
+        # A pool entry that an initialiser only reads a few bytes of is not a
+        # string of this function; IDA shows it as one ("DeviceTyScen").
+        keep = [t for t in texts if not _is_fragment(t, scan["str_sites"].get(t, ()), dec)]
+        hidden, texts = len(texts) - len(keep), keep
+    if texts:
         out["strings"] = {"total": len(texts), "top": [_clip(t, 80) for t in texts[:top + 4]]}
+    if dec and (dec["items"] or dec.get("unavailable") or dec["failed"]):
+        box = {"total": len(dec["items"])}
+        if dec["items"]:
+            box["top"] = [_decoded_line(i, 120) for i in dec["items"][:top + 4]]
+            box["how"] = ("written at run time by this function's one-time "
+                          "initialisers; recovered by emulating them")
+            if len(dec["items"]) > top + 4:
+                box["more"] = "%d more: rekit.decode(%#x)" % (len(dec["items"]) - top - 4, start)
+        if hidden:
+            box["replaces"] = ("%d constant-pool fragment%s the initialisers read, "
+                               "left out of strings" % (hidden, "" if hidden == 1 else "s"))
+        if dec["failed"]:
+            box["failed"] = _failed_text(dec)
+        if dec.get("unavailable"):
+            box["unavailable"] = dec["unavailable"]
+        out["decoded"] = box
     if scan["globs"]:
         lst, total = _ranked(scan["globs"], _ref, top)
         out["globals"] = {"total": total, "top": lst}
     if scan["capped"]:
-        out["scan_capped"] = "only the first %d instructions were scanned" % scan["insns"]
+        out["scan_capped"] = ("only the first %d instructions were scanned; rekit.scan(%#x) "
+                              "counts calls and immediates over the whole function"
+                              % (scan["insns"], start))
     if code == "none":
         proto = idc.get_type(start) or idc.guess_type(start)
         if proto:
@@ -893,14 +956,17 @@ def _card(f, code, max_chars, top, force):
     consts, total = _consts(raw)
     if consts:
         out["consts"] = {"total": total, "top": consts}
+        if any('"' in c for c in consts):
+            out["consts"]["text"] = ("quoted = that constant's bytes read as text; "
+                                     "fragments, not joined")
     out["code"] = body
     return out
 
 
 @_api
-def fn(ea, code="trim", max_chars=BUDGET, top=8, force=False):
+def fn(ea, code="trim", max_chars=BUDGET, top=8, force=False, decode=True):
     """Function card: who calls it, what it calls and touches, and its code."""
-    return _card(_func(ea), code, max_chars, top, force)
+    return _card(_func(ea), code, max_chars, top, force, decode)
 
 
 @_api
@@ -957,6 +1023,7 @@ def calls(ea, depth=2, dir="out", max_nodes=60, fanout=12, max_chars=BUDGET):
         raise RekitError("bad dir %r" % dir, 'use "out" or "in"')
     root = _func(ea).start_ea
     lines, seen, count = [], {root}, [1]
+    indirect, marks = {}, set()
 
     def kids(node):
         f = ida_funcs.get_func(node)
@@ -965,15 +1032,22 @@ def calls(ea, depth=2, dir="out", max_nodes=60, fanout=12, max_chars=BUDGET):
             funcs = sorted(scan["calls"], key=lambda k: (-scan["calls"][k], k))
             imps = sorted(scan["imps"], key=lambda k: (-scan["imps"][k], k))
             return funcs, imps
-        by = {}
+        by, taken, data = {}, {}, []
         for x in idautils.XrefsTo(node, ida_xref.XREF_FAR):
-            if not x.iscode or (x.type not in _CALL and x.type not in _JUMP):
-                continue
             cf = ida_funcs.get_func(x.frm)
-            if cf is not None and cf.start_ea != node:
-                by[cf.start_ea] = by.get(cf.start_ea, 0) + 1
-            if len(by) > 5000:
+            if x.iscode:
+                if x.type not in _CALL and x.type not in _JUMP:
+                    continue
+                if cf is not None and cf.start_ea != node:
+                    by[cf.start_ea] = by.get(cf.start_ea, 0) + 1
+            elif cf is None:
+                data.append(x.frm)      # a pointer stored in a table or vtable
+            elif cf.start_ea != node:
+                taken.setdefault(cf.start_ea, x.frm)
+            if len(by) + len(taken) + len(data) > 5000:
                 break
+        # the address is taken (stored, passed as a callback) without a call
+        indirect[node] = ({k: v for k, v in taken.items() if k not in by}, data)
         return sorted(by, key=lambda k: (-by[k], k)), []
 
     def walk(node, level):
@@ -995,12 +1069,39 @@ def calls(ea, depth=2, dir="out", max_nodes=60, fanout=12, max_chars=BUDGET):
             lines.append(pad + _ref(child))
             if level + 1 < depth:
                 walk(child, level + 1)
+        taken, data = indirect.get(node, ({}, []))
+        for i, child in enumerate(sorted(taken)):
+            if i >= fanout or count[0] >= max_nodes:
+                lines.append("%s... %d more [addr]" % (pad, len(taken) - i))
+                break
+            marks.add("addr")
+            tag = " [addr %#x]" % taken[child]
+            if child in seen:
+                lines.append("%s%s%s ^" % (pad, _ref(child), tag))
+                continue
+            seen.add(child)
+            count[0] += 1
+            lines.append(pad + _ref(child) + tag)
+            if level + 1 < depth:
+                walk(child, level + 1)
+        for i, at in enumerate(data):
+            if i >= min(fanout, 4):
+                lines.append("%s... %d more [data]" % (pad, len(data) - i))
+                break
+            marks.add("data")
+            lines.append("%s%#x %s [data]" % (pad, at, _seg(at)))
 
     lines.append(_ref(root))
     walk(root, 0)
+    legend = "^ = already expanded above; indentation = call depth"
+    if "addr" in marks:
+        legend += ("; [addr X] = takes the function's address at X instead of "
+                   "calling it (callback, dispatch table)")
+    if "data" in marks:
+        legend += ("; [data] = a pointer to the function stored in data (vtable, "
+                   "table): rekit.xrefs(that address) shows who reads it")
     out = {"root": _ref(root), "dir": dir, "depth": depth, "nodes": count[0],
-           "tree": "\n".join(lines),
-           "legend": "^ = already expanded above; indentation = call depth"}
+           "tree": "\n".join(lines), "legend": legend}
     if count[0] >= max_nodes:
         out["capped"] = "max_nodes=%d reached; lower depth or start deeper" % max_nodes
     return out
@@ -1109,7 +1210,8 @@ def find(name=None, string=None, bytes=None, imm=None, limit=20, regex=False,
                 note = "stopped at limit; raise limit for more"
                 break
             if time.time() > deadline:
-                note = "time budget of %ds hit; hits are a prefix" % seconds
+                note = ("time budget of %ds hit; hits are a prefix. To search one "
+                        "function or range use rekit.scan(ea, imm=...)" % seconds)
                 break
     out = {"query": {kind: name or string or bytes or imm}, "total": total, "hits": hits}
     if total > len(hits):
@@ -1172,7 +1274,7 @@ def notes(ea=None, limit=20, max_chars=BUDGET):
 
 
 @_api
-def batch(eas, code="none", max_chars=BUDGET * 2, top=5):
+def batch(eas, code="none", max_chars=BUDGET * 2, top=5, decode=True):
     """Several function cards in one call; the budget is shared between them."""
     eas = list(eas)
     if not eas:
@@ -1181,14 +1283,491 @@ def batch(eas, code="none", max_chars=BUDGET * 2, top=5):
         raise RekitError("%d addresses is too many for one call" % len(eas),
                          "send at most 40 at a time")
     each = max(600, max_chars // len(eas))
-    cards = []
+    funcs, scans = [], {}
     for item in eas:
         try:
-            cards.append(_card(_func(item), code, each, top, False))
+            funcs.append(_func(item))
+        except RekitError as exc:
+            funcs.append(exc)
+    if decode:
+        # one emulator process for every card's initialisers
+        for f in funcs:
+            if not isinstance(f, RekitError) and f.start_ea not in scans:
+                scans[f.start_ea] = _scan(f)
+        _decode_fill([(f, _init_regions(f, scans[f.start_ea])) for f in funcs
+                      if not isinstance(f, RekitError) and f.start_ea not in _DECODED])
+    cards = []
+    for item, f in zip(eas, funcs):
+        try:
+            if isinstance(f, RekitError):
+                raise f
+            cards.append(_card(f, code, each, top, False, decode, scans.get(f.start_ea)))
         except RekitError as exc:
             shown = "%#x" % item if isinstance(item, int) else str(item)
             cards.append({"ea": shown, "error": exc.msg})
     return {"count": len(cards), "cards": cards}
+
+
+# --------------------------------------------------------------------------
+# scanning one function or address range
+# --------------------------------------------------------------------------
+
+_MASK = (1 << 64) - 1
+_RANGES = {}             # spans -> index, the few most recent ones
+
+
+def _int(x, what):
+    if isinstance(x, int) and not isinstance(x, bool):
+        return x
+    try:
+        return int(str(x), 0)
+    except ValueError:
+        raise RekitError("bad %s %r" % (what, x), "pass an int or a \"0x...\" string")
+
+
+def _spans(ea, end):
+    """(label, [(lo, hi), ...]) for a whole function or for [ea, end)."""
+    if end is None:
+        f = _func(ea)
+        spans = sorted((cs, ce) for cs, ce in idautils.Chunks(f.start_ea))
+        label = "%s %#x-%#x" % (_ref(f.start_ea), f.start_ea, f.end_ea)
+        if len(spans) > 1:
+            label += " and %d more chunks" % (len(spans) - 1)
+        return label, spans
+    lo = _ea(ea)
+    hi = end if isinstance(end, int) and not isinstance(end, bool) else None
+    if hi is None:
+        text = str(end).strip()
+        hi = int(text, 16) if re.fullmatch(r"0[xX][0-9A-Fa-f]+", text) else _ea(end)
+    if hi <= lo:
+        raise RekitError("end %#x is not above the start %#x" % (hi, lo),
+                         "end is an address, not a length")
+    return "%#x-%#x" % (lo, hi), [(lo, hi)]
+
+
+def _range_index(spans, refresh, seconds):
+    """Direct calls, tail calls, indirect calls and immediates of a range.
+
+    One pass over the instructions; kept for the next question about the same
+    range, since a flattened function is asked about many times.
+    """
+    key = tuple(spans)
+    if not refresh and key in _RANGES:
+        return _RANGES[key], True
+    deadline = time.time() + seconds
+    calls, tails, imms, indirect = {}, {}, {}, []
+    count, partial = 0, None
+    insn = ida_ua.insn_t()
+    for lo, hi in spans:
+        ea = lo
+        while ea < hi:
+            flags = ida_bytes.get_flags(ea)
+            size = ida_ua.decode_insn(insn, ea) if ida_bytes.is_code(flags) else 0
+            if size <= 0:
+                ea = idc.next_head(ea, hi)
+                if ea == BADADDR:
+                    break
+                continue
+            count += 1
+            if not count & 0x3FFF and time.time() > deadline:
+                partial = ea
+                break
+            if ida_idp.is_call_insn(insn):
+                for x in idautils.XrefsFrom(ea, ida_xref.XREF_FAR):
+                    if x.iscode and x.type in _CALL:
+                        calls.setdefault(x.to, []).append(ea)
+                        break
+                else:
+                    indirect.append(ea)
+            elif any(op.type in (ida_ua.o_near, ida_ua.o_far) for op in insn.ops):
+                # a jump to the start of another function is a tail call
+                for x in idautils.XrefsFrom(ea, ida_xref.XREF_FAR):
+                    if x.iscode and x.type in _JUMP \
+                            and not any(a <= x.to < b for a, b in spans):
+                        tf = ida_funcs.get_func(x.to)
+                        if tf is not None and tf.start_ea == x.to:
+                            tails.setdefault(x.to, []).append(ea)
+            mnem = None
+            for op in insn.ops:
+                if op.type == ida_ua.o_void:
+                    break
+                # operands IDA resolved to an address are not constants
+                if op.type == ida_ua.o_imm and not ida_bytes.is_off(flags, op.n):
+                    rec = imms.get(op.value & _MASK)
+                    if rec is None:
+                        rec = imms[op.value & _MASK] = ([], {})
+                    rec[0].append(ea)
+                    if mnem is None:
+                        mnem = insn.get_canon_mnem().upper()
+                    rec[1][mnem] = rec[1].get(mnem, 0) + 1
+            ea += size
+        if partial is not None:
+            break
+    index = {"insns": count, "calls": calls, "tails": tails, "imms": imms,
+             "indirect": indirect, "partial": partial}
+    if partial is None:
+        _RANGES[key] = index
+        while len(_RANGES) > 4:
+            del _RANGES[next(iter(_RANGES))]
+    return index, False
+
+
+def _target_label(ea):
+    f = ida_funcs.get_func(ea)
+    if f is not None and f.start_ea == ea and f.flags & ida_funcs.FUNC_THUNK:
+        return _short(ida_funcs.get_func_name(ea) or "%#x" % ea, 60)
+    if _is_extern(ea):
+        return _short(ida_name.get_name(ea) or "%#x" % ea, 60)
+    return _ref(ea)
+
+
+def _line(ea, n=60):
+    return _clip(re.sub(r"\s{2,}", " ", idc.generate_disasm_line(ea, 0) or "?"), n)
+
+
+def _reg_before(site, regno, floor, depth=64):
+    """The immediate last moved into a register on the straight line into site.
+
+    (value, "") or (None, reason). Only the fall-through path is read: the
+    walk gives up at a jump target, where another path could bring a different
+    value, and at a call, which leaves its own result in argument registers.
+    """
+    insn = ida_ua.insn_t()
+    cur = site
+    for _ in range(depth):
+        if any(x.iscode and x.type in _JUMP for x in idautils.XrefsTo(cur, 0)):
+            return None, "set before the jump target %#x" % cur
+        prev = idc.prev_head(cur, floor)
+        if prev == BADADDR or not ida_bytes.is_flow(ida_bytes.get_flags(cur)) \
+                or ida_ua.decode_insn(insn, prev) <= 0:
+            return None, "no straight-line code before %#x" % cur
+        if ida_idp.is_call_insn(insn):
+            return None, "left by the call at %#x" % prev
+        feat = insn.get_canon_feature()
+        ops = [op for op in insn.ops if op.type != ida_ua.o_void]
+        for i, op in enumerate(ops[:6]):
+            if op.type != ida_ua.o_reg or op.reg != regno \
+                    or not feat & (ida_idp.CF_CHG1 << i):
+                continue
+            mnem = insn.get_canon_mnem().lower()
+            if i == 0 and len(ops) == 2 and ops[1].type == ida_ua.o_imm \
+                    and mnem in ("mov", "movz", "li"):
+                return ops[1].value & _MASK, ""
+            if mnem in ("xor", "eor") and len(ops) >= 2 and len({o.reg for o in ops}) == 1 \
+                    and all(o.type == ida_ua.o_reg for o in ops):
+                return 0, ""
+            return None, _line(prev, 48)
+        cur = prev
+    return None, "not set in the %d instructions before the call" % depth
+
+
+@_api
+def scan(ea, end=None, show="calls", imm=None, to=None, reg=None, mnem=None,
+         min=0x10000, start=0, limit=None, refresh=False, seconds=120,
+         max_chars=BUDGET):
+    """Calls and immediates inside one function, or inside [ea, end).
+
+    For code that cannot be decompiled. Default: direct calls counted by
+    target. show="imms": the distinct immediates of at least `min`. imm=V:
+    where V is used. to=target: every call site of it; with reg="w0", also the
+    immediate moved into that register on the straight line before the call.
+    """
+    floor_value, room = _int(min, "min"), max(max_chars, 800) - 500
+    if imm is not None and to is not None:
+        raise RekitError("pass imm= or to=, not both")
+    if show not in ("calls", "imms"):
+        raise RekitError("bad show %r" % (show,), 'use "calls" or "imms"')
+    if reg is not None and to is None:
+        raise RekitError("reg= needs to=<call target>",
+                         'e.g. rekit.scan(ea, to="_syscall", reg="w0")')
+    start = max(0, int(start))
+    label, spans = _spans(ea, end)
+    index, cached = _range_index(spans, refresh, seconds)
+    out = {"range": label, "insns": index["insns"]}
+    again = "%#x" % spans[0][0] if end is None else "%#x, end=%#x" % spans[0]
+    if index["partial"] is not None:
+        out["capped"] = ("time budget of %ds hit at %#x; the result covers the range "
+                         "up to there. Raise seconds or scan a smaller range"
+                         % (seconds, index["partial"]))
+
+    if imm is not None:
+        value = _int(imm, "imm") & _MASK
+        sites = index["imms"].get(value, ([], {}))[0]
+        cap = limit or 20
+        out.update({"imm": "%#x" % value, "total": len(sites),
+                    "hits": ["%#x %s" % (s, _line(s)) for s in sites[start:start + cap]]})
+        if len(sites) > start + cap:
+            out["more"] = "%d not shown: pass start=%d or raise limit" % (
+                len(sites) - start - cap, start + cap)
+        return out
+
+    if to is not None:
+        target = _ea(to)
+        sites = [(s, "") for s in index["calls"].get(target, ())] \
+            + [(s, " tail") for s in index["tails"].get(target, ())]
+        if not sites:
+            raise RekitError("no direct call to %s in %s" % (_target_label(target), label),
+                             "rekit.scan(%s) lists the targets called there" % again)
+        sites.sort()
+        cap = limit or 40
+        out.update({"to": _target_label(target), "sites": len(sites)})
+        if reg is None:
+            rows = ["%#x%s" % s for s in sites]
+        else:
+            info = ida_idp.reg_info_t()
+            if not any(ida_idp.parse_reg_name(info, r)
+                       for r in (str(reg), str(reg).upper(), str(reg).lower())):
+                raise RekitError("no register named %r on this processor" % (reg,),
+                                 'e.g. reg="w0" on arm64, reg="edi" on x64')
+            rows, dist = [], {}
+            for site, tail in sites:
+                value, why = _reg_before(site, info.reg, spans[0][0])
+                key = "?" if value is None else "%#x" % value
+                dist[key] = dist.get(key, 0) + 1
+                rows.append("%#x %s%s" % (site, key if value is not None else "? " + why, tail))
+            out["reg"] = str(reg)
+            out["values"], _ = _ranked(dist, str, 40)
+            if "?" in dist:
+                out["unknown"] = ("? = the last write before the call was not an "
+                                  "immediate on the straight line; read that site "
+                                  "with rekit.disasm")
+        out["at"] = rows[start:start + cap]
+        if len(rows) > start + cap:
+            out["more"] = "%d not shown: pass start=%d or raise limit" % (
+                len(rows) - start - cap, start + cap)
+        return out
+
+    if show == "imms":
+        if mnem is None:
+            wanted = None
+        else:
+            wanted = {str(m).upper() for m in ([mnem] if isinstance(mnem, str) else mnem)}
+        rows = []
+        for value in sorted(index["imms"]):
+            if value < floor_value:
+                continue
+            sites, by = index["imms"][value]
+            n = len(sites) if wanted is None else sum(c for m, c in by.items() if m in wanted)
+            if n:
+                rows.append("%#x%s %s" % (value, " x%d" % n if n > 1 else "",
+                                          "/".join(sorted(m for m in by
+                                                          if wanted is None or m in wanted))))
+        shown = _page(rows, start, room)
+        if limit:
+            shown = shown[:limit]
+        box = {"total": len(rows), "min": "%#x" % floor_value,
+               "shown": [start, start + len(shown)], "top": shown}
+        if wanted is not None:
+            box["mnem"] = sorted(wanted)
+        out["imms"] = box
+        if start + len(shown) < len(rows):
+            out["more"] = 'rekit.scan(%s, show="imms", start=%d)' % (again, start + len(shown))
+        return out
+
+    counts = {}
+    for target, sites in index["calls"].items():
+        counts[target] = [len(sites), 0]
+    for target, sites in index["tails"].items():
+        counts.setdefault(target, [0, 0])[1] = len(sites)
+    order = sorted(counts, key=lambda k: (-sum(counts[k]), k))
+    rows = []
+    for target in order:
+        direct, tail = counts[target]
+        text = _target_label(target)
+        if direct > 1 or (direct and tail):
+            text += " x%d" % direct
+        if tail:
+            text += " +%d tail" % tail if direct else " tail x%d" % tail
+        rows.append(text)
+    cap = limit or 20
+    shown = rows[start:start + cap]
+    box = {"sites": sum(c[0] for c in counts.values()), "targets": len(rows), "top": shown}
+    tail_total = sum(c[1] for c in counts.values())
+    if tail_total:
+        box["tail_calls"] = tail_total
+    out["calls"] = box
+    if index["indirect"]:
+        out["indirect"] = {"total": len(index["indirect"]),
+                           "at": ["%#x" % a for a in index["indirect"][:4]]}
+    if len(rows) > start + cap:
+        out["more"] = "%d more targets: pass start=%d or raise limit" % (
+            len(rows) - start - cap, start + cap)
+    return out
+
+
+# --------------------------------------------------------------------------
+# strings built at run time
+# --------------------------------------------------------------------------
+
+_DECODED = {}            # function start -> what its initialisers write
+_WSTR = re.compile(r'^(0x[0-9a-fA-F]+) (L?)"(.*)"$', re.S)
+_INIT_INSNS = 200000
+
+
+def _writable(ea):
+    seg = ida_segment.getseg(ea)
+    if seg is None or seg.type == ida_segment.SEG_XTRN:
+        return False
+    if seg.perm:
+        return bool(seg.perm & ida_segment.SEGPERM_WRITE)
+    return seg.type in (ida_segment.SEG_DATA, ida_segment.SEG_BSS)
+
+
+def _init_regions(f, scan, cap=32):
+    """Flag-guarded one-time initialisers of a function.
+
+    The compiler's form for a lazily built static is: read a flag byte, skip
+    if set, build the value, set the flag. So a writable byte the function
+    both reads and writes marks one, from the read to just after the write.
+    What is built in between (a string split into constants, an XOR loop, the
+    vectorised form of either) does not have to be recognised: it is run.
+    """
+    out = []
+    for flag, first in scan["reads"].items():
+        stores = scan["writes"].get(flag)
+        if not stores or not _writable(flag) or ida_bytes.get_item_size(flag) != 1:
+            continue
+        begin = first
+        prev = idc.prev_head(first, 0)
+        if prev != BADADDR and ida_funcs.get_func(prev) is not None \
+                and ida_funcs.get_func(prev).start_ea == f.start_ea:
+            # the instruction that forms the flag's page address belongs too
+            if any(x.to >> 12 == flag >> 12
+                   for x in idautils.XrefsFrom(prev, ida_xref.XREF_DATA)):
+                begin = prev
+        ends = sorted({idc.next_head(w) for w in stores} - {BADADDR})
+        if ends:
+            out.append({"flag": flag, "start": begin, "until": ends})
+    out.sort(key=lambda r: r["start"])
+    return out[:cap]
+
+
+def _decode_fill(jobs):
+    """Emulate the initialisers of several functions in one emulator run."""
+    todo = {}
+    for f, regions in jobs:
+        todo.setdefault(f.start_ea, regions)
+    reqs, owner = [], []
+    for start, regions in todo.items():
+        for r in regions:
+            reqs.append({"start": "%#x" % r["start"],
+                         "until": ["%#x" % u for u in r["until"]],
+                         "max_insns": _INIT_INSNS})
+            owner.append((start, r))
+    found = {start: {"regions": len(regions), "items": [], "spans": [], "failed": {}}
+             for start, regions in todo.items()}
+    error = None
+    if reqs:
+        import _emu
+        try:
+            reply = _emu.run({"requests": reqs, "max_chars": 6000 * len(reqs) + 4000},
+                             timeout=60)
+            error = reply.get("error")
+        except _emu.EmuError as exc:
+            reply, error = {}, exc.msg
+        results = {r.get("id"): r for r in reply.get("results", []) if isinstance(r, dict)}
+        for i, (start, region) in enumerate(owner):
+            box = found[start]
+            one = results.get(i)
+            if error or one is None:
+                continue
+            stop = one.get("stop") or {}
+            if stop.get("reason") != "until":
+                reason = str(stop.get("reason") or one.get("error") or "error")
+                box["failed"][reason] = box["failed"].get(reason, 0) + 1
+                continue
+            hit = int(stop["at"], 16)
+            inline = hit > region["start"]
+            # a backward jump inside the initialiser: the value is computed
+            loop = inline and any(
+                x.iscode and x.type in _JUMP and region["start"] <= x.to <= head
+                for head in idautils.Heads(region["start"], hit)
+                for x in idautils.XrefsFrom(head, ida_xref.XREF_FAR))
+            if inline:
+                box["spans"].append((region["start"], hit))
+            for write in (one.get("writes") or {}).get("top", []):
+                if not _writable(int(write["addr"], 16)):
+                    continue        # a store through a register nobody set
+                for shown in (write.get("strings") or {}).get("top", []):
+                    m = _WSTR.match(shown)
+                    if m is None:
+                        continue
+                    item = {"ea": int(m.group(1), 16), "text": m.group(3),
+                            "wide": bool(m.group(2)), "start": region["start"],
+                            "end": hit if inline else region["until"][-1], "loop": loop}
+                    if not any(i["ea"] == item["ea"] and i["text"] == item["text"]
+                               for i in box["items"]):
+                        box["items"].append(item)
+    for start, box in found.items():
+        if error:
+            box["unavailable"] = "emulation failed: %s" % _clip(str(error), 160)
+        else:
+            _DECODED[start] = box       # a failure may be transient: not kept
+    while len(_DECODED) > 4000:
+        del _DECODED[next(iter(_DECODED))]
+    return found
+
+
+def _decoded(f, scan=None, refresh=False):
+    start = f.start_ea
+    if refresh or start not in _DECODED:
+        regions = _init_regions(f, scan or _scan(f))
+        return _decode_fill([(f, regions)])[start]
+    return _DECODED[start]
+
+
+def _decoded_line(item, n):
+    return '%#x %s"%s" | init %#x-%#x%s' % (
+        item["ea"], "L" if item["wide"] else "", _clip(item["text"], n),
+        item["start"], item["end"], " | loop" if item["loop"] else "")
+
+
+def _failed_text(dec):
+    return "%d of %d initialisers did not run to their end (%s)" % (
+        sum(dec["failed"].values()), dec["regions"],
+        ", ".join("%s x%d" % kv for kv in sorted(dec["failed"].items())))
+
+
+def _is_fragment(text, sites, dec):
+    """A pool entry referenced only inside initialisers that were decoded."""
+    if not sites or not all(any(a <= s < b for a, b in dec["spans"]) for s in sites):
+        return False
+    if any(text == item["text"] for item in dec["items"]):
+        return False            # a whole literal that was copied: a real string
+    return len(text) < 4 or any(text[:4] in item["text"] for item in dec["items"])
+
+
+@_api
+def decode(ea, limit=50, refresh=False, max_chars=BUDGET):
+    """Strings a function builds at run time in its one-time initialisers.
+
+    Each flag-guarded initialiser is emulated on a snapshot of the database
+    from the file's initial state; the strings it writes to static memory are
+    reported with the address they are built at. Nothing runs natively.
+    """
+    f = _func(ea)
+    dec = _decoded(f, refresh=refresh)
+    out = {"fn": _ref(f.start_ea), "initialisers": dec["regions"],
+           "total": len(dec["items"])}
+    if dec.get("unavailable"):
+        out["unavailable"] = dec["unavailable"]
+    if not dec["regions"]:
+        out["note"] = ("no flag-guarded one-time initialiser here. For a decode "
+                       "routine that takes arguments, call it with rekit.emu")
+        return out
+    shown = _page([_decoded_line(i, 400) for i in dec["items"][:limit]], 0,
+                  max(max_chars, 800) - 600)
+    out["strings"] = shown
+    if dec["items"]:
+        out["how"] = ("each initialiser was emulated from the file's initial state; "
+                      "the address is where the string is built, init is the code "
+                      "that builds it, loop = computed in a loop (decoded, not "
+                      "just stored)")
+    if len(shown) < len(dec["items"]):
+        out["more"] = "%d not shown: raise limit or max_chars" % (len(dec["items"]) - len(shown))
+    if dec["failed"]:
+        out["failed"] = _failed_text(dec)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -1211,6 +1790,9 @@ def selftest(n=30, seed=1):
             break
     fails, raw_chars, trim_chars, card_chars, started = [], 0, 0, [], time.time()
     undecompilable = set()
+    proc = ida_ida.inf_get_procname().lower()
+    arg_reg = "x0" if proc.startswith("arm") and ida_ida.inf_is_64bit() else \
+        "eax" if proc == "metapc" else None
 
     def check(label, res, budget=BUDGET):
         try:
@@ -1253,6 +1835,30 @@ def selftest(n=30, seed=1):
         check("calls out " + tag, calls(ea, depth=2))
         check("calls in " + tag, calls(ea, depth=1, dir="in"))
         check("disasm " + tag, disasm(ea, n=20))
+        # a range scan sees at least every direct callee the card counts
+        res = scan(ea)
+        if check("scan " + tag, res):
+            index = _RANGES.get(tuple(sorted(idautils.Chunks(ea)))) or {"calls": {}, "tails": {}}
+            f = ida_funcs.get_func(ea)
+            card_scan = _scan(f)
+            missed = [t for t in card_scan["calls"]
+                      if t not in index["calls"] and t not in index["tails"]]
+            if missed and not card_scan["capped"]:
+                fails.append("scan %s: misses callee %#x the card lists" % (tag, missed[0]))
+            if index["calls"]:
+                target = next(iter(index["calls"]))
+                check("scan to " + tag, scan(ea, to=target))
+                if arg_reg:
+                    sites = scan(ea, to=target, reg=arg_reg)
+                    if check("scan reg " + tag, sites) \
+                            and len(sites.get("at", [])) != min(sites["sites"], 40):
+                        fails.append("scan reg %s: site list and count disagree" % tag)
+        listed = scan(ea, show="imms", min=0x100)
+        if check("scan imms " + tag, listed) and listed["imms"]["top"]:
+            value = listed["imms"]["top"][0].split()[0]
+            if not scan(ea, imm=value).get("total"):
+                fails.append("scan %s: immediate %s is listed but not found" % (tag, value))
+        check("decode " + tag, decode(ea))
     # a string shown on a card must also be findable by search
     probes = []
     for ea in all_funcs[::max(1, len(all_funcs) // 3000)]:
@@ -1266,8 +1872,26 @@ def selftest(n=30, seed=1):
         res = find(string=text, limit=1)
         if not res.get("total"):
             fails.append("find(string=%r): shown on a card but not found by search" % text)
+    # a function reached only through its address must not look uncalled
+    for ea in all_funcs[::max(1, len(all_funcs) // 4000)]:
+        refs = list(idautils.XrefsTo(ea, ida_xref.XREF_FAR))
+        if refs and len(refs) <= 8 and not any(x.iscode for x in refs) \
+                and not any((ida_funcs.get_func(x.frm) or ida_funcs.get_func(ea)).start_ea == ea
+                            for x in refs):
+            tree = calls(ea, depth=1, dir="in")
+            if check("calls in (address only) %#x" % ea, tree) \
+                    and "[addr" not in tree["tree"] and "[data]" not in tree["tree"]:
+                fails.append("calls in %#x: has data references but the tree is empty" % ea)
+            break
+    for label, res in (("scan(0)", scan(0)), ("scan imm+to", scan(pool[0], imm=1, to=pool[0])
+                                              if pool else {"error": 1}),
+                       ("scan reg without to", scan(pool[0], reg="x0") if pool else {"error": 1}),
+                       ("decode(0)", decode(0))):
+        if "error" not in res:
+            fails.append("%s should be an error" % label)
     check("info", info())
-    check("batch", batch(pool[:8]), BUDGET * 2)
+    if pool:
+        check("batch", batch(pool[:8]), BUDGET * 2)
     check("find name", find(name="sub_", limit=3))
     if "error" not in fn(0):
         fails.append("fn(0) should be an error")

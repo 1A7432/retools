@@ -21,6 +21,13 @@ STRICT_OK = [
     "a = rekit.fn(0x1000)\nb = rekit.fn(0x2000)\n[a, b]",
     "rekit.disasm(0x1000, n=-1)",
     "rekit.emu(0x401000, args=[1, 2], max_steps=5000)",
+    'rekit.scan("sub_1A2B3C0")',
+    'rekit.scan(0x1a2b3c0, end=0x1c13ef0, show="imms", min=0x10000, '
+    'mnem=["MOV", "EOR"], start=60)',
+    'rekit.scan("sub_1A2B3C0", imm=0x5BD1E995)',
+    '{"n": rekit.scan(0x1a2b3c0, to="_syscall", reg="w0", limit=40), '
+    '"s": rekit.decode("sub_2F4D10", limit=20)}',
+    'rekit.fn(0x1000, decode=False)',
     'rekit.emu("sub_1002660", args=[{"bytes": "00 11"}, {"out": 16}], '
     'init=["sub_1002480", 0x1002890, {"func": "sub_1002A00", "args": [3, {"out": 8, "name": "seed"}], '
     '"replace": {"sub_1001000": {"stub": "malloc"}}}])',

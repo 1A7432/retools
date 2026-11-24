@@ -35,6 +35,9 @@ REKIT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
                                           "..", "rekit"))
 REKIT_API = {"help", "info", "fn", "code", "xrefs", "calls", "find", "disasm",
              "batch", "emu", "selftest",
+             # range scans of code that cannot be decompiled, and strings the
+             # one-time initialisers build (emulated on the snapshot, like emu)
+             "scan", "decode",
              # whole-program emulation in the rebox sandbox (never the Docker
              # mode), the crypto-constant matcher, and the restricted calculator
              "run", "crypto", "calc"}
